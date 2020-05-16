@@ -22,9 +22,9 @@ class BertMultiTaskLearning(BertPreTrainedModel):
 
     def forward(self, input_ids, token_type_ids= None, attention_mask= None, labels = None):
         
-        input_ids = input_ids.to("cuda")
+        input_ids = input_ids.to("cuda:0")
         # token_type_ids =  token_type_ids.to("cuda")
-        attention_mask = attention_mask.to("cuda")
+        attention_mask = attention_mask.to("cuda:0")
 
         sequence_output, pooled_output = self.bert(input_ids, token_type_ids, attention_mask, output_all_encoded_layers= False)
         sequence_output = self.dropout(sequence_output)

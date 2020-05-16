@@ -25,5 +25,9 @@ parser.add_argument("--rel", dest="rel", action="store_true")
 parser.add_argument("--trainset", type=str, default=path_data+train_path)
 parser.add_argument("--validset", type=str, default=path_data+dev_path)
 parser.add_argument("--input", type=str, default= None)
+parser.add_argument("--run", type=str, default=None)
+parser.add_argument("--group_classes", dest="group_classes", action="store_true")
+parser.add_argument("--dummy_run", dest="dummy_run", action="store_true")
+
 
 params = parser.parse_args()

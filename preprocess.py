@@ -117,7 +117,7 @@ def make_dataset(directory):
     return res
 
 
-a = make_dataset(path_data+train_path)
+# a = make_dataset(path_data+train_path)
 
 def make_bert_testset(dataset):    
     words, tags, ids= [], [], []
@@ -255,11 +255,11 @@ def mda(dataset):
         tags.append(tmp_label)
         ids.append(tmp_id)
 
-c, d, e = make_bert_testset(a)
-print("########################")
-print(c[0][0])
-print("########################")
-print(d[0][0])
-print("########################")
-print(e[0][0])
-print("########################")
+# c, d, e = make_bert_testset(a)
+# print("########################")
+# print(c[0][0])
+# print("########################")
+# print(d[0][0])
+# print("########################")
+# print(e[0][0])
+# print("########################")

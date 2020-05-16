@@ -51,9 +51,45 @@ if num_task == 2:
                 , "Thought-terminating_Cliches", "Red_Herring", "Straw_Men", "Whataboutism"))
     VOCAB.append(("Non-prop", "Prop"))
 
+
+
+
 for i in range(num_task):
     tag2idx.append({tag:idx for idx, tag in enumerate(VOCAB[i])})
     idx2tag.append({idx:tag for idx, tag in enumerate(VOCAB[i])})
+
+if params.group_classes:
+    
+    tag2idx[0]["Red_Herring"] = 2 #2 is classify and delete
+    tag2idx[0]["Name_Calling,Labeling"] = 2
+    tag2idx[0]["Reductio_ad_hitlerum"] = 2
+    tag2idx[0]["Repetition"] = 2
+
+    tag2idx[0]["Obfuscation,Intentional_Vagueness,Confusion"] = 3 ###3 is the Style Transfer Class
+    tag2idx[0]["Loaded_Language"] = 3
+
+    tag2idx[0]["Slogans"] = 1                                     #### 1 is the ignore class 'O'
+    tag2idx[0]["Appeal_to_fear-prejudice"] = 1
+    tag2idx[0]["Doubt"] = 1
+    tag2idx[0]["Exaggeration,Minimisation"] = 1
+    tag2idx[0]["Flag-Waving"] = 1
+    tag2idx[0]["Bandwagon"] = 1
+    tag2idx[0]["Causal_Oversimplification"] = 1
+    tag2idx[0]["Appeal_to_Authority"] = 1
+    tag2idx[0]["Black-and-White_Fallacy"] = 1
+    tag2idx[0]["Thought-terminating_Cliches"] = 1
+    tag2idx[0]["Straw_Men"] = 1
+    tag2idx[0]["Whataboutism"] = 1
+    
+    tag2idx[0]["CD"] = 2
+    tag2idx[0]["O"] = 1
+    tag2idx[0]["ST"]= 3
+
+    idx2tag[0][1] = "O"
+    idx2tag[0][2] = "CD"
+    idx2tag[0][3] = "ST"
+
+
 
 tokenizer = BertTokenizer.from_pretrained('bert-base-cased', do_lower_case=False)
 
@@ -80,6 +116,11 @@ class PropDataset(data.Dataset):
 
         sents, ids = [], [] 
         tags_li = [[] for _ in range(num_task)]
+
+        if params.dummy_run:
+            flat_words = [flat_words[0]]
+            flat_tags = [flat_tags[0]]
+            flat_ids = [flat_ids[0]]
    
         for word, tag, id in zip(flat_words, flat_tags, flat_ids):
             words = word

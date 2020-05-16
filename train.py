@@ -33,8 +33,12 @@ timestr = time.strftime("%Y%m%d-%H%M%S")
 #     dev = "cuda:0"
 # else:
 # 	dev = "cpu"
+if not params.run:
+    params.run = timestr
+if params.dummy_run:
+    params.batch_size = 1
 
-dev = "cuda"
+dev = "cuda:0"
 
 def train(model, iterator, optimizer, criterion, binary_criterion):
 
@@ -48,7 +52,7 @@ def train(model, iterator, optimizer, criterion, binary_criterion):
         words, x, is_heads, att_mask, tags, y, seqlens = batch
         
         # words.to("cuda")
-        x = x.to(dev)
+        # x = x.to(dev)
         # print("x = {}".format(x))
         check_cuda()
         # is_heads.to("cuda")
@@ -58,7 +62,7 @@ def train(model, iterator, optimizer, criterion, binary_criterion):
         check_cuda()
 
         att_mask = torch.Tensor(att_mask)
-        att_mask = att_mask.to(dev)
+        # att_mask = att_mask.to(dev)
 
         check_cuda()
 
@@ -112,6 +116,7 @@ def eval(model, iterator, f, criterion, binary_criterion):
 
     valid_losses = []
 
+
     Words, Is_heads = [], []
     Tags = [[] for _ in range(num_task)]
     Y = [[] for _ in range(num_task)]
@@ -161,7 +166,7 @@ def eval(model, iterator, f, criterion, binary_criterion):
                 fout.write(words.split()[0])
                 fout.write("\n")
                 for w, t1, p_1 in zip(words.split()[2:-1], tags[0].split()[1:-1], preds[0][1:-1]):
-                    fout.write("{} {} {} \n".format(w,t1,p_1))
+                    fout.write("{},{},{} \n".format(w,idx2tag[0][tag2idx[0][t1]],p_1))
                 fout.write("\n")
         
         elif num_task == 2:
@@ -263,13 +268,13 @@ def eval(model, iterator, f, criterion, binary_criterion):
     return precision, recall, f1, valid_loss                 
 
 if __name__ == "__main__":
-    wandb.init(project="news_bias")
+    wandb.init(project="news_bias", name=params.run)
 
     model_bert = BertMultiTaskLearning.from_pretrained('bert-base-cased')
     print("Detect ", torch.cuda.device_count(), "GPUs!")
     # print("First Time cached is {}\n allocated is {}".format(
         # torch.cuda.memory_cached(0), torch.cuda.memory_allocated(0)))
-    model_bert = nn.DataParallel(model_bert)
+    # model_bert = nn.DataParallel(model_bert)
     # print("cached is {}\n allocated is {}".format(torch.cuda.memory_cached(0),torch.cuda.memory_allocated(0)))
     torch.cuda.empty_cache()
     # print("cached is {}\n allocated is {}".format(
@@ -341,8 +346,8 @@ if __name__ == "__main__":
             os.makedirs('checkpoints')
         if not os.path.exists('results'):
             os.makedirs('results')
-        fname = os.path.join('checkpoints', timestr)
-        spath = os.path.join('checkpoints', timestr+".pt")
+        fname = os.path.join('checkpoints', params.run)
+        spath = os.path.join('checkpoints', params.run+".pt")
 
         print("For epoch {} cached is {}\n allocated is {}".format(epoch, torch.cuda.memory_cached(0), torch.cuda.memory_allocated(0)))
 
