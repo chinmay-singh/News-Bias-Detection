@@ -11,6 +11,7 @@ from dataloader import PropDataset, pad, VOCAB, tokenizer, tag2idx, idx2tag, num
 import time
 from early_stopping import EarlyStopping
 import wandb
+import sklearn
 
 import torch
 import gc
@@ -166,7 +167,7 @@ def eval(model, iterator, f, criterion, binary_criterion):
                 fout.write(words.split()[0])
                 fout.write("\n")
                 for w, t1, p_1 in zip(words.split()[2:-1], tags[0].split()[1:-1], preds[0][1:-1]):
-                    fout.write("{},{},{} \n".format(w,idx2tag[0][tag2idx[0][t1]],p_1))
+                    fout.write("{},{},{}\n".format(w,idx2tag[0][tag2idx[0][t1]],p_1))
                 fout.write("\n")
         
         elif num_task == 2:
@@ -216,8 +217,10 @@ def eval(model, iterator, f, criterion, binary_criterion):
     ## calc metric 
     y_true, y_pred = [], []
     for i in range(num_task):
-        y_true.append(np.array([tag2idx[i][line.split()[i+1]] for line in open(f, 'r').read().splitlines() if len(line.split()) > 1]))
-        y_pred.append(np.array([tag2idx[i][line.split()[i+1+num_task]] for line in open(f, 'r').read().splitlines() if len(line.split()) > 1]))
+        y_true.append(np.array([tag2idx[i][line.split(',')[i+1].strip()] for line in open(
+            f, 'r').read().splitlines() if (len(line.split(',')) > 1) and (line.split(',')[i+1].strip() in tag2idx[0].keys()) and (line.split(',')[i+1+num_task].strip() in tag2idx[0].keys())]))
+        
+        y_pred.append(np.array([tag2idx[i][line.split(',')[i+1+num_task].strip()] for line in open(f, 'r').read().splitlines() if len(line.split(',')) > 1 and (line.split(',')[i+1].strip() in tag2idx[0].keys()) and (line.split(',')[i+1+num_task].strip() in tag2idx[0].keys())]))
     
     num_predicted, num_correct, num_gold = 0, 0, 0
     if num_task != 2:
@@ -225,6 +228,15 @@ def eval(model, iterator, f, criterion, binary_criterion):
             num_predicted += len(y_pred[i][y_pred[i]>1])
             num_correct += (np.logical_and(y_true[i]==y_pred[i], y_true[i]>1)).astype(np.int).sum()
             num_gold += len(y_true[i][y_true[i]>1])
+
+
+            if params.group_classes:
+                group_report = sklearn.metrics.classification_report(
+                    y_true, y_pred, labels=["CD", "ST", "O"], output_dict=True)
+
+
+
+
     elif num_task == 2:  
         num_predicted += len(y_pred[0][y_pred[0]>1])
         num_correct += (np.logical_and(y_true[0]==y_pred[0], y_true[0]>1)).astype(np.int).sum()
@@ -265,7 +277,10 @@ def eval(model, iterator, f, criterion, binary_criterion):
     print("precision=%.4f"%precision)
     print("recall=%.4f"%recall)
     print("f1=%.4f"%f1)
-    return precision, recall, f1, valid_loss                 
+    if not params.group_classes:
+        return precision, recall, f1, valid_loss
+    else:
+        return precision, recall, f1, valid_loss, group_report
 
 if __name__ == "__main__":
     wandb.init(project="news_bias", name=params.run)
@@ -346,8 +361,8 @@ if __name__ == "__main__":
             os.makedirs('checkpoints')
         if not os.path.exists('results'):
             os.makedirs('results')
-        fname = os.path.join('checkpoints', params.run)
-        spath = os.path.join('checkpoints', params.run+".pt")
+        fname = os.path.join('checkpoints_epoch_{}_'.format(epoch), params.run)
+        spath = os.path.join('checkpoints_epoch_{}_'.format(epoch), params.run+".pt")
 
         print("For epoch {} cached is {}\n allocated is {}".format(epoch, torch.cuda.memory_cached(0), torch.cuda.memory_allocated(0)))
 
@@ -357,14 +372,22 @@ if __name__ == "__main__":
         
         avg_train_losses.append(train_loss.item())
 
-        precision, recall, f1, valid_loss = eval(
-            model_bert, eval_iter, fname, criterion, binary_criterion)
-        avg_valid_losses.append(valid_loss.item())
 
-        '''
-        #####_____Logging to wandb_____######
-        '''
-        wandb.log({"Training Loss": train_loss.item(), "Validation Loss":valid_loss.item(), "Precision":precision, "Recall":recall, "F1":f1})
+        if not params.group_classes:
+            precision, recall, f1, valid_loss = eval(
+                model_bert, eval_iter, fname, criterion, binary_criterion)
+            avg_valid_losses.append(valid_loss.item())
+
+            wandb.log({"Training Loss": train_loss.item(), "Validation Loss": valid_loss.item(
+            ), "Precision": precision, "Recall": recall, "F1": f1})
+        else:
+            precision, recall, f1, valid_loss, group_report = eval(
+                model_bert, eval_iter, fname, criterion, binary_criterion)
+            avg_valid_losses.append(valid_loss.item())
+
+            wandb.log({"Training Loss": train_loss.item(), "Validation Loss": valid_loss.item(
+            ), "Precision": precision, "Recall": recall, "F1": f1, "CD_F1": group_report["CD"]["f1-score"], "ST_F1": group_report["ST"]["f1-score"], "O_F1": group_report["O"]["f1-score"]})
+
 
         epoch_len = len(str(params.n_epochs))
         print_msg = (f'[{epoch:>{epoch_len}}/{params.n_epochs:>{epoch_len}}]     ' +
