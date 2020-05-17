@@ -59,8 +59,7 @@ for i in range(num_task):
     idx2tag.append({idx:tag for idx, tag in enumerate(VOCAB[i])})
 
 if params.group_classes:
-    
-tag2idx[0]["Red_Herring"] = 2 #2 is classify and delete
+    tag2idx[0]["Red_Herring"] = 2 #2 is classify and delete
     tag2idx[0]["Name_Calling,Labeling"] = 2
     tag2idx[0]["Reductio_ad_hitlerum"] = 2
     tag2idx[0]["Repetition"] = 2
@@ -82,7 +81,7 @@ tag2idx[0]["Red_Herring"] = 2 #2 is classify and delete
     tag2idx[0]["Whataboutism"] = 1
     
     tag2idx[0]["CD"] = 2
-    tag2idx[0]["O"] = 1    
+    tag2idx[0]["O"] = 1
     tag2idx[0]["ST"]= 3
 
     idx2tag[0][1] = "O"

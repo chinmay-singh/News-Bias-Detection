@@ -216,12 +216,36 @@ def eval(model, iterator, f, criterion, binary_criterion):
 
     ## calc metric 
     y_true, y_pred = [], []
+
+    '''
+    SOme error in the writing of file is being made debug this later
+    '''
+
     for i in range(num_task):
         y_true.append(np.array([tag2idx[i][line.split(',')[i+1].strip()] for line in open(
             f, 'r').read().splitlines() if (len(line.split(',')) > 1) and (line.split(',')[i+1].strip() in tag2idx[0].keys()) and (line.split(',')[i+1+num_task].strip() in tag2idx[0].keys())]))
         
         y_pred.append(np.array([tag2idx[i][line.split(',')[i+1+num_task].strip()] for line in open(f, 'r').read().splitlines() if len(line.split(',')) > 1 and (line.split(',')[i+1].strip() in tag2idx[0].keys()) and (line.split(',')[i+1+num_task].strip() in tag2idx[0].keys())]))
     
+    if params.group_classes:
+        guess = []
+        ans = []
+        a = open(f, 'r').read().splitlines()
+        for line in a:
+            if len(line.split(',')) > 1:
+                b = line.split(',')[1].strip() 
+                c = line.split(',')[2].strip()
+                if (str(b).strip() not in tag2idx[0].keys()) or (str(c).strip() not in tag2idx[0].keys()):
+                    pass
+                else:
+                    ans.append(b)
+                    guess.append(c)
+
+        group_report = sklearn.metrics.classification_report(
+            ans, guess, labels=["CD", "ST", "O"], output_dict=True)
+        
+
+
     num_predicted, num_correct, num_gold = 0, 0, 0
     if num_task != 2:
         for i in range(num_task):
@@ -229,10 +253,6 @@ def eval(model, iterator, f, criterion, binary_criterion):
             num_correct += (np.logical_and(y_true[i]==y_pred[i], y_true[i]>1)).astype(np.int).sum()
             num_gold += len(y_true[i][y_true[i]>1])
 
-
-            if params.group_classes:
-                group_report = sklearn.metrics.classification_report(
-                    y_true, y_pred, labels=["CD", "ST", "O"], output_dict=True)
 
 
 
@@ -361,8 +381,8 @@ if __name__ == "__main__":
             os.makedirs('checkpoints')
         if not os.path.exists('results'):
             os.makedirs('results')
-        fname = os.path.join('checkpoints_epoch_{}_'.format(epoch), params.run)
-        spath = os.path.join('checkpoints_epoch_{}_'.format(epoch), params.run+".pt")
+        fname = os.path.join('checkpoints','epoch_{}_'.format(epoch)+params.run)
+        spath = os.path.join('checkpoints','epoch_{}_'.format(epoch)+params.run+".pt")
 
         print("For epoch {} cached is {}\n allocated is {}".format(epoch, torch.cuda.memory_cached(0), torch.cuda.memory_allocated(0)))
 
