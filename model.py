@@ -2,19 +2,24 @@ import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss
 from torch.nn.functional import relu, tanh, sigmoid
-from pytorch_pretrained_bert import BertModel, modeling
-from pytorch_pretrained_bert.modeling import BertPreTrainedModel
+from transformers import BertModel, BertConfig
+# from pytorch_pretrained_bert import BertModel, modeling
+# from pytorch_pretrained_bert.modeling import BertPreTrainedModel
+from transformers.modeling_bert import BertPreTrainedModel
 from dataloader import num_task, VOCAB, hier, sig, rel
 # from dataloader import *
+from params import params
 
+dev = params.device
 
 class BertMultiTaskLearning(BertPreTrainedModel):
     def __init__(self, config):
         super(BertMultiTaskLearning, self).__init__(config)
+        # super(BertMultiTaskLearning, self)
         self.bert = BertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.ModuleList([nn.Linear(config.hidden_size, len(VOCAB[i])) for i in range(num_task)])
-        self.apply(self.init_bert_weights)
+        # self.apply(self._init_bert_weights)
         self.masking_gate = nn.Linear(2,1)
 
         if num_task == 2:
@@ -22,13 +27,13 @@ class BertMultiTaskLearning(BertPreTrainedModel):
 
     def forward(self, input_ids, token_type_ids= None, attention_mask= None, labels = None):
         
-        input_ids = input_ids.to("cuda:0")
+        input_ids = input_ids.to(dev)
         # token_type_ids =  token_type_ids.to("cuda")
-        attention_mask = attention_mask.to("cuda:0")
+        attention_mask = attention_mask.to(dev)
 
-        sequence_output, pooled_output = self.bert(input_ids, token_type_ids, attention_mask, output_all_encoded_layers= False)
-        sequence_output = self.dropout(sequence_output)
-        pooled_output = self.dropout(pooled_output)
+        output = self.bert(input_ids,token_type_ids= token_type_ids,attention_mask = attention_mask)
+        sequence_output = self.dropout(output[0])
+        pooled_output = self.dropout(output[1])
 
         if num_task == 1:
             logits = [self.classifier[i](sequence_output) for i in range(num_task)]

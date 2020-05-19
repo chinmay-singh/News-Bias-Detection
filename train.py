@@ -6,7 +6,10 @@ import os
 from params import params
 import numpy as np
 from model import BertMultiTaskLearning
-from pytorch_pretrained_bert.optimization import BertAdam, WarmupLinearSchedule
+
+from transformers import BertConfig , AdamW, get_linear_schedule_with_warmup
+
+# from pytorch_pretrained_bert.optimization import BertAdam, WarmupLinearSchedule
 from dataloader import PropDataset, pad, VOCAB, tokenizer, tag2idx, idx2tag, num_task, masking
 import time
 from early_stopping import EarlyStopping
@@ -39,7 +42,7 @@ if not params.run:
 if params.dummy_run:
     params.batch_size = 1
 
-dev = "cuda:0"
+dev = params.device
 
 def train(model, iterator, optimizer, criterion, binary_criterion):
 
@@ -102,6 +105,7 @@ def train(model, iterator, optimizer, criterion, binary_criterion):
         joint_loss.backward()
 
         optimizer.step()
+        scheduler.step()
 
         train_losses.append(joint_loss.item())
 
@@ -305,11 +309,13 @@ def eval(model, iterator, f, criterion, binary_criterion):
 if __name__ == "__main__":
     wandb.init(project="news_bias", name=params.run)
 
-    model_bert = BertMultiTaskLearning.from_pretrained('bert-base-cased')
+    # config = BertConfig.from_pretrained('bert-base-cased')
+
+    model_bert = BertMultiTaskLearning.from_pretrained('bert-base-uncased')
     print("Detect ", torch.cuda.device_count(), "GPUs!")
     # print("First Time cached is {}\n allocated is {}".format(
         # torch.cuda.memory_cached(0), torch.cuda.memory_allocated(0)))
-    # model_bert = nn.DataParallel(model_bert)
+    model_bert = nn.DataParallel(model_bert)
     # print("cached is {}\n allocated is {}".format(torch.cuda.memory_cached(0),torch.cuda.memory_allocated(0)))
     torch.cuda.empty_cache()
     # print("cached is {}\n allocated is {}".format(
@@ -357,10 +363,13 @@ if __name__ == "__main__":
             nd in n for nd in no_decay)], 'weight_decay': 0.0}
     ]
 
-    optimizer = BertAdam(optimizer_grouped_parameters,
-                         lr=params.lr,
-                         warmup=warmup_proportion,
-                         t_total=num_train_optimization_steps)
+    # optimizer = BertAdam(optimizer_grouped_parameters,
+    #                      lr=params.lr,
+    #                      warmup=warmup_proportion,
+    #                      t_total=num_train_optimization_steps)
+
+    optimizer = AdamW(optimizer_grouped_parameters, lr = params.lr, correct_bias=True )
+    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps = int(warmup_proportion*num_train_optimization_steps), num_training_steps = num_train_optimization_steps )
 
     criterion = nn.CrossEntropyLoss(ignore_index=0)
     binary_criterion = nn.BCEWithLogitsLoss(

@@ -3,7 +3,7 @@ import torch
 from torch.utils import data
 import pathlib
 from preprocess import make_dataset, make_bert_dataset, make_bert_testset
-from pytorch_pretrained_bert import BertTokenizer
+from transformers import BertTokenizer
 from params import params
 
 
@@ -62,7 +62,7 @@ if params.group_classes:
     tag2idx[0]["Red_Herring"] = 2 #2 is classify and delete
     tag2idx[0]["Name_Calling,Labeling"] = 2
     tag2idx[0]["Reductio_ad_hitlerum"] = 2
-    tag2idx[0]["Repetition"] = 2
+    tag2idx[0]["Repetition"] = 2 #Maybe Put to others class
 
     tag2idx[0]["Obfuscation,Intentional_Vagueness,Confusion"] = 3 ###3 is the Style Transfer Class
     tag2idx[0]["Loaded_Language"] = 3
