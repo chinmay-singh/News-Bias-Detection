@@ -307,7 +307,9 @@ def eval(model, iterator, f, criterion, binary_criterion):
         return precision, recall, f1, valid_loss, group_report
 
 if __name__ == "__main__":
-    wandb.init(project="news_bias", name=params.run)
+
+    if params.wandb:
+        wandb.init(project="news_bias", name=params.run)
 
     # config = BertConfig.from_pretrained('bert-base-cased')
 
@@ -407,15 +409,18 @@ if __name__ == "__main__":
                 model_bert, eval_iter, fname, criterion, binary_criterion)
             avg_valid_losses.append(valid_loss.item())
 
-            wandb.log({"Training Loss": train_loss.item(), "Validation Loss": valid_loss.item(
-            ), "Precision": precision, "Recall": recall, "F1": f1})
+
+            if params.wandb:
+                wandb.log({"Training Loss": train_loss.item(), "Validation Loss": valid_loss.item(
+                ), "Precision": precision, "Recall": recall, "F1": f1})
         else:
             precision, recall, f1, valid_loss, group_report = eval(
                 model_bert, eval_iter, fname, criterion, binary_criterion)
             avg_valid_losses.append(valid_loss.item())
 
-            wandb.log({"Training Loss": train_loss.item(), "Validation Loss": valid_loss.item(
-            ), "Precision": precision, "Recall": recall, "F1": f1, "CD_F1": group_report["CD"]["f1-score"], "ST_F1": group_report["ST"]["f1-score"], "O_F1": group_report["O"]["f1-score"]})
+            if params.wandb:
+                wandb.log({"Training Loss": train_loss.item(), "Validation Loss": valid_loss.item(
+                ), "Precision": precision, "Recall": recall, "F1": f1, "CD_F1": group_report["CD"]["f1-score"], "ST_F1": group_report["ST"]["f1-score"], "O_F1": group_report["O"]["f1-score"]})
 
 
         epoch_len = len(str(params.n_epochs))

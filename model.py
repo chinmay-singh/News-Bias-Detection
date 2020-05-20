@@ -18,7 +18,12 @@ class BertMultiTaskLearning(BertPreTrainedModel):
         # super(BertMultiTaskLearning, self)
         self.bert = BertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.classifier = nn.ModuleList([nn.Linear(config.hidden_size, len(VOCAB[i])) for i in range(num_task)])
+
+        # self.classifier = nn.ModuleList([nn.Linear(config.hidden_size, len(VOCAB[i])) for i in range(num_task)])
+        
+        self.classifier = nn.ModuleList(
+            [nn.Linear(config.hidden_size, 4)])
+
         # self.apply(self._init_bert_weights)
         self.masking_gate = nn.Linear(2,1)
 
