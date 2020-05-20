@@ -319,7 +319,9 @@ if __name__ == "__main__":
         # torch.cuda.memory_cached(0), torch.cuda.memory_allocated(0)))
     model_bert = nn.DataParallel(model_bert)
     # print("cached is {}\n allocated is {}".format(torch.cuda.memory_cached(0),torch.cuda.memory_allocated(0)))
-    torch.cuda.empty_cache()
+    
+    # torch.cuda.empty_cache()
+
     # print("cached is {}\n allocated is {}".format(
     # torch.cuda.memory_cached(0), torch.cuda.memory_allocated(0)))
 
@@ -375,7 +377,7 @@ if __name__ == "__main__":
 
     criterion = nn.CrossEntropyLoss(ignore_index=0)
     binary_criterion = nn.BCEWithLogitsLoss(
-        pos_weight=torch.Tensor([3932/14263]).cuda())
+        pos_weight=torch.Tensor([3932/14263]).to(dev))
 
     avg_train_losses = []
     avg_valid_losses = []
@@ -384,8 +386,8 @@ if __name__ == "__main__":
     early_stopping = EarlyStopping(patience=params.patience, verbose=True)
 
     for epoch in range(1, params.n_epochs+1):
-        print("For epoch {} cached is {}\n allocated is {}".format(epoch, 
-            torch.cuda.memory_cached(0), torch.cuda.memory_allocated(0)))
+        # print("For epoch {} cached is {}\n allocated is {}".format(epoch, 
+        #     torch.cuda.memory_cached(0), torch.cuda.memory_allocated(0)))
 
         print("=========eval at epoch={epoch}=========")
         if not os.path.exists('checkpoints'):
@@ -395,7 +397,7 @@ if __name__ == "__main__":
         fname = os.path.join('checkpoints','epoch_{}_'.format(epoch)+params.run)
         spath = os.path.join('checkpoints','epoch_{}_'.format(epoch)+params.run+".pt")
 
-        print("For epoch {} cached is {}\n allocated is {}".format(epoch, torch.cuda.memory_cached(0), torch.cuda.memory_allocated(0)))
+        # print("For epoch {} cached is {}\n allocated is {}".format(epoch, torch.cuda.memory_cached(0), torch.cuda.memory_allocated(0)))
 
         train_loss = train(model_bert, train_iter, optimizer,
                            criterion, binary_criterion)

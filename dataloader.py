@@ -30,6 +30,7 @@ if params.sig:
 elif params.rel:
     sig = 0 
     rel = 1
+
     
 input_size=768
 VOCAB, tag2idx, idx2tag = [], [], []
@@ -48,15 +49,20 @@ if num_task == 2:
                 , "Exaggeration,Minimisation", "Flag-Waving", "Loaded_Language"
                 , "Reductio_ad_hitlerum", "Bandwagon"
                 , "Causal_Oversimplification", "Obfuscation,Intentional_Vagueness,Confusion", "Appeal_to_Authority", "Black-and-White_Fallacy"
-                , "Thought-terminating_Cliches", "Red_Herring", "Straw_Men", "Whataboutism"))
+                , "Thought-terminating_Cliches", "Red_Herring", "Straw_Men", "Whataboutism","CD", "ST"))
     VOCAB.append(("Non-prop", "Prop"))
 
 
 
 
+# for i in range(num_task):
+#     tag2idx.append({tag:idx for idx, tag in enumerate(VOCAB[i])})
+#     idx2tag.append({idx:tag for idx, tag in enumerate(VOCAB[i])})
+
 for i in range(num_task):
-    tag2idx.append({tag:idx for idx, tag in enumerate(VOCAB[i])})
-    idx2tag.append({idx:tag for idx, tag in enumerate(VOCAB[i])})
+    tag2idx.append({})
+    idx2tag.append({})
+
 
 if params.group_classes:
     tag2idx[0]["Red_Herring"] = 2 #2 is classify and delete
@@ -83,10 +89,12 @@ if params.group_classes:
     tag2idx[0]["CD"] = 2
     tag2idx[0]["O"] = 1
     tag2idx[0]["ST"]= 3
+    tag2idx[0]["<PAD>"] = 0
 
     idx2tag[0][1] = "O"
     idx2tag[0][2] = "CD"
     idx2tag[0][3] = "ST"
+    idx2tag[0][0] = "<PAD>"
 
 
 
@@ -101,16 +109,29 @@ class PropDataset(data.Dataset):
             words, tags, ids = make_bert_testset(dataset)
         else:
             words, tags, ids = make_bert_dataset(dataset)
-        flat_words, flat_tags, flat_ids = [], [], []
+        flat_words, flat_tags, flat_ids, changed_ids = [] , [], [] , []
+
+
+        count = 0
+
         for article_w, article_t, article_id in zip(words, tags, ids):
             for sentence, tag, id in zip(article_w, article_t, article_id):
-                flat_words.append(sentence)             # We seperated the sentences and 
-                                                        # Seperated them from the groupings
+                flat_words.append(sentence) 
+                
+                changed= [ idx2tag[0][tag2idx[0][temp_tag]] for temp_tag in tag  ]                                        # Seperated them from the groupings
+                                                    
                                                         # which were article wise to make a list of just sentences
-                flat_tags.append(tag)
+                if set(changed) == {'O'}:
+                    count+=1
+                    pass
+
+                changed_ids.append(changed)
+
+                flat_tags.append(changed)
+
                 flat_ids.append(id)
-        
-        # print("sentence is {} \n tag is {} \n id is {} \n".format(flat_words[0],flat_tags[0],flat_ids[0]))
+        print("{} sentences dropped".format(count))
+        print("sentence is {} \n tag is {} \n id is {} \n changed_ids is {}".format(flat_words[:2],flat_tags[:2],flat_ids[:2],changed_ids[:2]))
 
 
         sents, ids = [], [] 
@@ -135,7 +156,7 @@ class PropDataset(data.Dataset):
                 for i in range(num_task):
                     tmp_tags.append(['O']*len(tags))
                     for j, tag in enumerate(tags):
-                        if tag != 'O' and tag in VOCAB[i]:
+                        if tag != 'O' and tag in ["CD","ST"]:
                             tmp_tags[i][j] = tag
                     tags_li[i].append(["<PAD>"] + tmp_tags[i] + ["<PAD>"])
             elif num_task == 2:
@@ -254,10 +275,13 @@ def pad(batch):
     return words, x, is_heads, att_mask, tags, y, seqlen
 
 
-path_data = '.'
-train_path = "/data/protechn_corpus_eval/train"
-text_path = "/*.tsv"
-label_path = "/*.txt"
-dev_path = "/data/protechn_corpus_eval/dev"
+# path_data = '.'
+# train_path = "/data/protechn_corpus_eval/train"
+# text_path = "/*.tsv"
+# label_path = "/*.txt"
+# dev_path = "/data/protechn_corpus_eval/dev"
 
-# print(pad(b))
+# getter = PropDataset(params.trainset)
+
+# print("###################################")
+# print(getter.__getitem__(0))
