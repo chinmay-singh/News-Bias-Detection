@@ -171,7 +171,7 @@ def eval(model, iterator, f, criterion, binary_criterion):
                 fout.write(words.split()[0])
                 fout.write("\n")
                 for w, t1, p_1 in zip(words.split()[2:-1], tags[0].split()[1:-1], preds[0][1:-1]):
-                    fout.write("{},{},{}\n".format(w,idx2tag[0][tag2idx[0][t1]],p_1))
+                    fout.write("{}\t{}\t{}\n".format(w, idx2tag[0][tag2idx[0][t1]], p_1))
                 fout.write("\n")
         
         elif num_task == 2:
@@ -225,28 +225,35 @@ def eval(model, iterator, f, criterion, binary_criterion):
     SOme error in the writing of file is being made debug this later
     '''
 
+    valid_tags = ["CD","O","ST", "<PAD>"]
+
     for i in range(num_task):
-        y_true.append(np.array([tag2idx[i][line.split(',')[i+1].strip()] for line in open(
-            f, 'r').read().splitlines() if (len(line.split(',')) > 1) and (line.split(',')[i+1].strip() in tag2idx[0].keys()) and (line.split(',')[i+1+num_task].strip() in tag2idx[0].keys())]))
-        
-        y_pred.append(np.array([tag2idx[i][line.split(',')[i+1+num_task].strip()] for line in open(f, 'r').read().splitlines() if len(line.split(',')) > 1 and (line.split(',')[i+1].strip() in tag2idx[0].keys()) and (line.split(',')[i+1+num_task].strip() in tag2idx[0].keys())]))
+        y_true.append(np.array([tag2idx[i][line.split('\t')[i+1].strip()] for line in open(
+            f, 'r').read().splitlines() if (len(line.split('\t')) > 1) and (line.split('\t')[i+1].strip() in valid_tags)
+             and (line.split('\t')[i+1+num_task].strip() in valid_tags)]))
+
+        y_pred.append(np.array([tag2idx[i][line.split('\t')[i+1+num_task].strip()] for line in open(f, 'r').read().splitlines() if len(line.split(
+            '\t')) > 1 and (line.split('\t')[i+1].strip() in valid_tags) and (line.split('\t')[i+1+num_task].strip() in valid_tags)]))
     
+    print("y_true is {}".format(y_true[0]) )
+    print("y_pred is {}".format(y_pred[0]) )
+
     if params.group_classes:
         guess = []
         ans = []
         a = open(f, 'r').read().splitlines()
         for line in a:
-            if len(line.split(',')) > 1:
-                b = line.split(',')[1].strip() 
-                c = line.split(',')[2].strip()
-                if (str(b).strip() not in tag2idx[0].keys()) or (str(c).strip() not in tag2idx[0].keys()):
-                    pass
+            if len(line.split('\t')) > 1:
+                b = line.split('\t')[1].strip() 
+                c = line.split('\t')[2].strip()
+                if (b not in valid_tags) or (c not in valid_tags):
+                    continue
                 else:
                     ans.append(b)
                     guess.append(c)
 
         group_report = sklearn.metrics.classification_report(
-            ans, guess, labels=["CD", "ST", "O"], output_dict=True)
+            ans, guess, labels=["CD", "ST", "O","<PAD>"], output_dict=True)
         
 
 
