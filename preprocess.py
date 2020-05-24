@@ -1,4 +1,4 @@
-##Making arrangements to import data
+## Making arrangements to import data
 import os
 import glob
 from pathlib import Path
@@ -11,24 +11,20 @@ text_path = "/*.tsv"
 label_path = "/*.txt"
 dev_path = "/data/protechn_corpus_eval/dev"
 
-#Same number of Train.Text as their labels
+# Same number of Train.Text as their labels
 assert len(glob.glob(path_data+train_path+text_path)) == len(glob.glob(path_data+train_path+ label_path))  
 
 def parse_label(path):
 
     labels = []
     f= Path(path)
-    # print("#################")
-    # print(path)
     if not f.exists():
         return labels
 
     for line in open(path):
         parts = line.strip().split('\t')
-        # print("#################")
-        # print(parts)
         labels.append([int(parts[2]), int(parts[3]), parts[1], 0, 0])
-    labels = sorted(labels) 
+    labels = sorted(labels)
 
     if labels:
         length = max([label[1] for label in labels]) 
@@ -40,7 +36,7 @@ def parse_label(path):
             else:
                visit[label[0]:label[1]] = 1
             res.append(label)
-        return res 
+        return res
     else:
         return labels
 
@@ -51,22 +47,20 @@ def read(path):
     labels = []
 
     for text_file in glob.glob(path+"/*.txt"):
-        
+
         id = text_file.replace('article', '').replace('.txt','')
         ids.append(id)
 
-        #writing to the text part
+        # writing to the text part
         f=open(text_file, "r", encoding="UTF-8")
         texts.append(f.read())
-        
-        #writing to the labels array
+
+        # writing to the labels array
         label_file = text_file.replace(".txt", ".labels.tsv")
-        # print("***************************")
-        # print(label_file)
         labels.append(parse_label(label_file))
 
     return ids, texts, labels
-    
+
 def clean_text(articles, ids):
     texts = []
     for article, id in zip(articles, ids):
@@ -95,13 +89,6 @@ def make_dataset(directory):
                 if l[0] >= sen[2] and l[0] < sen[3] and l[1] > sen[3]:
                     l[4] = 1
                     tmp.append(sen + [l[0], sen[3], l[2], l[3], l[4]])
-                    # print("*&*&*&*& Joint is")
-                    # print(sen + [l[0], sen[3], l[2], l[3], l[4]])
-                    # print("*&*&*&*& Sen is")
-                    # print(sen)
-                    # print("*&*&*&*& label is")
-                    # print(l)
-                    
 
                     pos_ind[i] = 1
                     l[0] = sen[3] + 1
@@ -117,9 +104,7 @@ def make_dataset(directory):
     return res
 
 
-# a = make_dataset(path_data+train_path)
-
-def make_bert_testset(dataset):    
+def make_bert_testset(dataset):
     words, tags, ids= [], [], []
     for article in dataset:
         tmp_doc, tmp_label, tmp_id = [], [], []
@@ -162,12 +147,6 @@ def make_bert_testset(dataset):
         words.append(tmp_doc) 
         tags.append(tmp_label)
         ids.append(tmp_id)
-    # print("Words are")
-    # print(words)
-    # print("tags are")
-    # print(tags)
-    # print("IDs are")
-    # print(ids)
     return words, tags, ids
 
 
@@ -215,12 +194,6 @@ def make_bert_dataset(dataset):
         words.append(tmp_doc) 
         tags.append(tmp_label)
         ids.append(tmp_id)
-    # print("Words are")
-    # print(words)
-    # print("tags are")
-    # print(tags)
-    # print("IDs are")
-    # print(ids)
     return words, tags, ids
 
 

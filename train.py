@@ -9,7 +9,6 @@ from model import BertMultiTaskLearning
 
 from transformers import BertConfig , AdamW, get_linear_schedule_with_warmup
 
-# from pytorch_pretrained_bert.optimization import BertAdam, WarmupLinearSchedule
 from dataloader import PropDataset, pad, VOCAB, tokenizer, tag2idx, idx2tag, num_task, masking
 import time
 from early_stopping import EarlyStopping
@@ -18,7 +17,9 @@ import sklearn
 
 import torch
 import gc
+
 count = 0
+
 def check_cuda():
     torch.cuda.empty_cache()
     for obj in gc.get_objects():
@@ -32,11 +33,7 @@ def check_cuda():
 
 
 timestr = time.strftime("%Y%m%d-%H%M%S")
-# torch.set_default_tensor_type("torch.cuda.FloatTensor")
-# if torch.cuda.is_available():
-#     dev = "cuda:0"
-# else:
-# 	dev = "cpu"
+
 if not params.run:
     params.run = timestr
 if params.dummy_run:
@@ -48,28 +45,15 @@ def train(model, iterator, optimizer, criterion, binary_criterion):
 
     check_cuda()
     model.train()
-    # print(model)
     check_cuda()
     train_losses = []
 
     for k, batch in enumerate(iterator):
         words, x, is_heads, att_mask, tags, y, seqlens = batch
-        
-        # words.to("cuda")
-        # x = x.to(dev)
-        # print("x = {}".format(x))
-        check_cuda()
-        # is_heads.to("cuda")
-        # tags.to("cuda")
-        # y.to("cuda")
-        # seqlens.to("cuda")
         check_cuda()
 
         att_mask = torch.Tensor(att_mask)
-        # att_mask = att_mask.to(dev)
-
         check_cuda()
-
 
         optimizer.zero_grad()
         logits, _ = model(x, attention_mask=att_mask)
@@ -79,13 +63,9 @@ def train(model, iterator, optimizer, criterion, binary_criterion):
         if num_task == 2:
             for i in range(num_task):
                 logits[i] = logits[i].view(-1, logits[i].shape[-1])
-            
-            # check_cuda()
 
             y[0] = y[0].view(-1).to(dev)
             y[1] = y[1].float().to(dev)
-            
-            # check_cuda()
 
             loss.append(criterion(logits[0], y[0]))
             loss.append(binary_criterion(logits[1], y[1]))
@@ -95,7 +75,6 @@ def train(model, iterator, optimizer, criterion, binary_criterion):
                 logits[i] = logits[i].view(-1, logits[i].shape[-1])
                 y[i] = y[i].view(-1).to(dev)
                 loss.append(criterion(logits[i], y[i]))
-        
 
         if num_task == 1:
             joint_loss = loss[0]
@@ -118,9 +97,7 @@ def train(model, iterator, optimizer, criterion, binary_criterion):
 
 def eval(model, iterator, f, criterion, binary_criterion):
     model.eval()
-
     valid_losses = []
-
 
     Words, Is_heads = [], []
     Tags = [[] for _ in range(num_task)]
@@ -131,7 +108,7 @@ def eval(model, iterator, f, criterion, binary_criterion):
             words, x, is_heads, att_mask, tags, y, seqlens = batch
             att_mask = torch.Tensor(att_mask)
             logits, y_hats = model(x, attention_mask=att_mask) # logits: (N, T, VOCAB), y: (N, T)
-    
+
             loss = []
             if num_task == 2 or masking:
                 for i in range(num_task):
@@ -173,7 +150,7 @@ def eval(model, iterator, f, criterion, binary_criterion):
                 for w, t1, p_1 in zip(words.split()[2:-1], tags[0].split()[1:-1], preds[0][1:-1]):
                     fout.write("{}\t{}\t{}\n".format(w, idx2tag[0][tag2idx[0][t1]], p_1))
                 fout.write("\n")
-        
+
         elif num_task == 2:
             false_neg = 0
             false_pos = 0
@@ -183,7 +160,7 @@ def eval(model, iterator, f, criterion, binary_criterion):
                 y_hats[0] = [hat for head, hat in zip(is_heads, y_hats[0]) if head == 1]
                 preds[0] = [idx2tag[0][hat] for hat in y_hats[0]]
                 preds[1] = idx2tag[1][y_hats[1]]
-            
+
                 if tags[1].split()[1:-1][0] == 'Non-prop' and preds[1] == 'Non-prop':
                     true_neg += 1
                 elif tags[1].split()[1:-1][0] == 'Non-prop' and preds[1] == 'Prop':
@@ -192,7 +169,7 @@ def eval(model, iterator, f, criterion, binary_criterion):
                     true_pos += 1
                 elif tags[1].split()[1:-1][0] == 'Prop' and preds[1] == 'Non-prop':
                     false_neg += 1
-                
+
                 fout.write(words.split()[0])
                 fout.write("\n")
                 for w, t1, p_1 in zip(words.split()[2:-1], tags[0].split()[1:-1], preds[0][1:-1]):
@@ -218,7 +195,7 @@ def eval(model, iterator, f, criterion, binary_criterion):
             print("sen_f1", f1)
             false_neg = false_pos = true_neg = true_pos = precision = recall = f1 = 0
 
-    ## calc metric 
+    ## calc metric
     y_true, y_pred = [], []
 
     '''
@@ -234,7 +211,7 @@ def eval(model, iterator, f, criterion, binary_criterion):
 
         y_pred.append(np.array([tag2idx[i][line.split('\t')[i+1+num_task].strip()] for line in open(f, 'r').read().splitlines() if len(line.split(
             '\t')) > 1 and (line.split('\t')[i+1].strip() in valid_tags) and (line.split('\t')[i+1+num_task].strip() in valid_tags)]))
-    
+
     print("y_true is {}".format(y_true[0]) )
     print("y_pred is {}".format(y_pred[0]) )
 
@@ -254,8 +231,6 @@ def eval(model, iterator, f, criterion, binary_criterion):
 
         group_report = sklearn.metrics.classification_report(
             ans, guess, labels=["CD", "ST", "O","<PAD>"], output_dict=True)
-        
-
 
     num_predicted, num_correct, num_gold = 0, 0, 0
     if num_task != 2:
@@ -264,18 +239,15 @@ def eval(model, iterator, f, criterion, binary_criterion):
             num_correct += (np.logical_and(y_true[i]==y_pred[i], y_true[i]>1)).astype(np.int).sum()
             num_gold += len(y_true[i][y_true[i]>1])
 
-
-
-
-
-    elif num_task == 2:  
+    elif num_task == 2:
         num_predicted += len(y_pred[0][y_pred[0]>1])
         num_correct += (np.logical_and(y_true[0]==y_pred[0], y_true[0]>1)).astype(np.int).sum()
         num_gold += len(y_true[0][y_true[0]>1])
-        
+
     print("num_predicted:{}".format(num_predicted))
     print("num_correct:{}".format(num_correct))
     print("num_gold:{}".format(num_gold))
+
     try:
         precision = num_correct / num_predicted
     except ZeroDivisionError:
@@ -295,6 +267,7 @@ def eval(model, iterator, f, criterion, binary_criterion):
             f1=0
 
     final = f + ".P%.4f_R%.4f_F1%.4f" %(precision, recall, f1)
+
     with open(final, 'w') as fout:
         result = open(f, "r").read()
         fout.write("{}\n".format(result))
@@ -318,52 +291,35 @@ if __name__ == "__main__":
     if params.wandb:
         wandb.init(project="news_bias", name=params.run)
 
-    # config = BertConfig.from_pretrained('bert-base-cased')
-
     model_bert = BertMultiTaskLearning.from_pretrained('bert-base-uncased')
     print("Detect ", torch.cuda.device_count(), "GPUs!")
-    # print("First Time cached is {}\n allocated is {}".format(
-        # torch.cuda.memory_cached(0), torch.cuda.memory_allocated(0)))
     model_bert = nn.DataParallel(model_bert)
-    # print("cached is {}\n allocated is {}".format(torch.cuda.memory_cached(0),torch.cuda.memory_allocated(0)))
-    
-    # torch.cuda.empty_cache()
-
-    # print("cached is {}\n allocated is {}".format(
-    # torch.cuda.memory_cached(0), torch.cuda.memory_allocated(0)))
-
     model_bert = model_bert.to(dev)
-
-    # print("cached is {}\n allocated is {}".format(torch.cuda.memory_cached(0), torch.cuda.memory_allocated(0)))
-
 
     train_dataset = PropDataset(params.trainset, False)
     eval_dataset = PropDataset(params.validset, True)
-    # test_dataset = PropDataset(params.testset, True)
 
     train_iter = data.DataLoader(dataset=train_dataset,
                                  batch_size=params.batch_size,
                                  shuffle=True,
                                  num_workers=1,
                                  collate_fn=pad)
+
     eval_iter = data.DataLoader(dataset=eval_dataset,
                                 batch_size=params.batch_size,
                                 shuffle=False,
                                 num_workers=1,
                                 collate_fn=pad)
+
     # test_iter = data.DataLoader(dataset=test_dataset,
     #                             batch_size=params.batch_size,
     #                             shuffle=False,
     #                             num_workers=1,
     #                             collate_fn=pad)
 
-    # print("cached is {}\n allocated is {}".format(
-    #     torch.cuda.memory_cached(0), torch.cuda.memory_allocated(0)))
-
-
     warmup_proportion = 0.1
-    num_train_optimization_steps = int(
-        len(train_dataset) / params.batch_size) * params.n_epochs
+    num_train_optimization_steps = int(len(train_dataset) / params.batch_size) * params.n_epochs
+
     param_optimizer = list(model_bert.named_parameters())
     param_optimizer = [n for n in param_optimizer if 'pooler' not in n[0]]
     no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
@@ -373,11 +329,6 @@ if __name__ == "__main__":
         {'params': [p for n, p in param_optimizer if any(
             nd in n for nd in no_decay)], 'weight_decay': 0.0}
     ]
-
-    # optimizer = BertAdam(optimizer_grouped_parameters,
-    #                      lr=params.lr,
-    #                      warmup=warmup_proportion,
-    #                      t_total=num_train_optimization_steps)
 
     optimizer = AdamW(optimizer_grouped_parameters, lr = params.lr, correct_bias=True )
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps = int(warmup_proportion*num_train_optimization_steps), num_training_steps = num_train_optimization_steps )
@@ -393,9 +344,6 @@ if __name__ == "__main__":
     early_stopping = EarlyStopping(patience=params.patience, verbose=True)
 
     for epoch in range(1, params.n_epochs+1):
-        # print("For epoch {} cached is {}\n allocated is {}".format(epoch, 
-        #     torch.cuda.memory_cached(0), torch.cuda.memory_allocated(0)))
-
         print("=========eval at epoch={epoch}=========")
         if not os.path.exists('checkpoints'):
             os.makedirs('checkpoints')
@@ -409,15 +357,12 @@ if __name__ == "__main__":
         train_loss = train(model_bert, train_iter, optimizer,
                            criterion, binary_criterion)
 
-        
         avg_train_losses.append(train_loss.item())
-
 
         if not params.group_classes:
             precision, recall, f1, valid_loss = eval(
                 model_bert, eval_iter, fname, criterion, binary_criterion)
             avg_valid_losses.append(valid_loss.item())
-
 
             if params.wandb:
                 wandb.log({"Training Loss": train_loss.item(), "Validation Loss": valid_loss.item(

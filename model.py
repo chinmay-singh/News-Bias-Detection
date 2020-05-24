@@ -3,11 +3,8 @@ from torch import nn
 from torch.nn import CrossEntropyLoss
 from torch.nn.functional import relu, tanh, sigmoid
 from transformers import BertModel, BertConfig
-# from pytorch_pretrained_bert import BertModel, modeling
-# from pytorch_pretrained_bert.modeling import BertPreTrainedModel
 from transformers.modeling_bert import BertPreTrainedModel
 from dataloader import num_task, VOCAB, hier, sig, rel
-# from dataloader import *
 from params import params
 
 dev = params.device
@@ -20,7 +17,7 @@ class BertMultiTaskLearning(BertPreTrainedModel):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
         # self.classifier = nn.ModuleList([nn.Linear(config.hidden_size, len(VOCAB[i])) for i in range(num_task)])
-        
+
         self.classifier = nn.ModuleList(
             [nn.Linear(config.hidden_size, 4)])
 
@@ -31,7 +28,7 @@ class BertMultiTaskLearning(BertPreTrainedModel):
             self.merge_classifier_1 = nn.Linear(len(VOCAB[0]+len(VOCAB[1])), len(VOCAB[0]))
 
     def forward(self, input_ids, token_type_ids= None, attention_mask= None, labels = None):
-        
+
         input_ids = input_ids.to(dev)
         # token_type_ids =  token_type_ids.to("cuda")
         attention_mask = attention_mask.to(dev)
@@ -42,7 +39,7 @@ class BertMultiTaskLearning(BertPreTrainedModel):
 
         if num_task == 1:
             logits = [self.classifier[i](sequence_output) for i in range(num_task)]
-        
+
         elif num_task ==2:
             token_level = self.classifier[0](sequence_output)
             sen_level = self.classifier[1](pooled_output)

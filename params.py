@@ -32,5 +32,4 @@ parser.add_argument("--device", type=str, default="cuda", help="name of the devi
 parser.add_argument("--wandb",  dest="wandb", action="store_true", default= False)
 
 
-
 params = parser.parse_args()

@@ -12,7 +12,6 @@ class EarlyStopping:
         self.filepath = filepath
 
     def __call__(self, val_loss, model, filepath):
-
         score = -val_loss
 
         if self.best_score is None:
@@ -34,3 +33,4 @@ class EarlyStopping:
             print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')
         torch.save(model.state_dict(), filepath)
         self.val_loss_min = val_loss
+
