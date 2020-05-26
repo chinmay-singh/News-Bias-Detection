@@ -6,7 +6,6 @@ from preprocess import make_dataset, make_bert_dataset, make_bert_testset
 from transformers import BertTokenizer
 from params import params
 
-
 if params.bert:
     num_task = 1
     masking = 0
@@ -31,22 +30,16 @@ elif params.rel:
     sig = 0
     rel = 1
 
-
 input_size = 768
 VOCAB, tag2idx, idx2tag = [], [], []
 
 if num_task == 1:
-
-    VOCAB.append(("<PAD>", "O", "Name_Calling,Labeling", "Repetition", "Slogans", "Appeal_to_fear-prejudice", "Doubt", "Exaggeration,Minimisation", "Flag-Waving", "Loaded_Language", "Reductio_ad_hitlerum", "Bandwagon",
-                  "Causal_Oversimplification", "Obfuscation,Intentional_Vagueness,Confusion", "Appeal_to_Authority", "Black-and-White_Fallacy", "Thought-terminating_Cliches", "Red_Herring", "Straw_Men", "Whataboutism"))
+    VOCAB.append(("<PAD>", "O", "Name_Calling,Labeling", "Repetition", "Slogans", "Appeal_to_fear-prejudice", "Doubt", "Exaggeration,Minimisation", "Flag-Waving", "Loaded_Language", "Reductio_ad_hitlerum", "Bandwagon", "Causal_Oversimplification", "Obfuscation,Intentional_Vagueness,Confusion", "Appeal_to_Authority", "Black-and-White_Fallacy", "Thought-terminating_Cliches", "Red_Herring", "Straw_Men", "Whataboutism"))
 
 #sentence classification
 if num_task == 2:
-    VOCAB.append(("<PAD>", "O", "Name_Calling,Labeling", "Repetition", "Slogans", "Appeal_to_fear-prejudice", "Doubt", "Exaggeration,Minimisation", "Flag-Waving", "Loaded_Language", "Reductio_ad_hitlerum", "Bandwagon",
-                  "Causal_Oversimplification", "Obfuscation,Intentional_Vagueness,Confusion", "Appeal_to_Authority", "Black-and-White_Fallacy", "Thought-terminating_Cliches", "Red_Herring", "Straw_Men", "Whataboutism", "CD", "ST"))
+    VOCAB.append(("<PAD>", "O", "Name_Calling,Labeling", "Repetition", "Slogans", "Appeal_to_fear-prejudice", "Doubt", "Exaggeration,Minimisation", "Flag-Waving", "Loaded_Language", "Reductio_ad_hitlerum", "Bandwagon", "Causal_Oversimplification", "Obfuscation,Intentional_Vagueness,Confusion", "Appeal_to_Authority", "Black-and-White_Fallacy", "Thought-terminating_Cliches", "Red_Herring", "Straw_Men", "Whataboutism", "CD", "ST"))
     VOCAB.append(("Non-prop", "Prop"))
-
-
 
 # for i in range(num_task):
 #     tag2idx.append({tag:idx for idx, tag in enumerate(VOCAB[i])})
@@ -56,16 +49,21 @@ for i in range(num_task):
     tag2idx.append({})
     idx2tag.append({})
 
-
 if params.group_classes:
-    tag2idx[0]["Red_Herring"] = 2  # 2 is classify and delete
-    tag2idx[0]["Name_Calling,Labeling"] = 2
-    tag2idx[0]["Reductio_ad_hitlerum"] = 2
-    tag2idx[0]["Repetition"] = 2  # Maybe Put to others class
+    BIOES =  ["B", "I", "E", "S"]
 
-    # 3 is the Style Transfer Class
-    tag2idx[0]["Obfuscation,Intentional_Vagueness,Confusion"] = 3
-    tag2idx[0]["Loaded_Language"] = 3
+    i = 0
+    for pre in BIOES:
+        p = pre + "-"
+        tag2idx[0][p + "Red_Herring"] = 2 + i  # 2+i is classify and delete for i = 0, 2, 4, 6, 
+        tag2idx[0][p + "Name_Calling,Labeling"] = 2 + i
+        tag2idx[0][p + "Reductio_ad_hitlerum"] = 2 + i
+
+        # 3 is the Style Transfer Class
+        tag2idx[0][p + "Obfuscation,Intentional_Vagueness,Confusion"] = 3 + i
+        tag2idx[0][p + "Loaded_Language"] = 3 + i
+        
+        i+= 2
 
     tag2idx[0]["Slogans"] = 1  # 1 is the ignore class 'O'
     tag2idx[0]["Appeal_to_fear-prejudice"] = 1
@@ -79,24 +77,87 @@ if params.group_classes:
     tag2idx[0]["Thought-terminating_Cliches"] = 1
     tag2idx[0]["Straw_Men"] = 1
     tag2idx[0]["Whataboutism"] = 1
+    tag2idx[0]["Repetition"] = 1 # Maybe Put to others class
 
-    tag2idx[0]["CD"] = 2
-    tag2idx[0]["O"] = 1
-    tag2idx[0]["ST"] = 3
+    i = 0
+    for pre in BIOES:
+        p = pre + "-"
+
+        tag2idx[0][p + "CD"] = 2 + i
+        tag2idx[0][p + "ST"] = 3 + i
+
+        idx2tag[0][2 + i] = p + "CD"
+        idx2tag[0][3 + i] = p + "ST"
+        
+        i += 2
+
     tag2idx[0]["<PAD>"] = 0
+    tag2idx[0]["O"] = 1
 
     idx2tag[0][1] = "O"
-    idx2tag[0][2] = "CD"
-    idx2tag[0][3] = "ST"
     idx2tag[0][0] = "<PAD>"
+print(tag2idx, idx2tag)
 
 tokenizer = BertTokenizer.from_pretrained(
     'bert-base-cased', do_lower_case=False)
 
+def convert_to_BIOES(tags):
+    BIOES_tags = []
+    IGNORE_CLASS = ["Slogans",
+                "Appeal_to_fear-prejudice",
+                "Doubt", 
+                "Exaggeration,Minimisation",
+                "Flag-Waving",
+                "Bandwagon",
+                "Causal_Oversimplification",
+                "Appeal_to_Authority",
+                "Black-and-White_Fallacy",
+                "Thought-terminating_Cliches",
+                "Straw_Men",
+                "Whataboutism",
+                "Repetition"]
+
+    i = 0
+    while i < len(tags):
+        tag = tags[i]
+        if tag == "O" or tag in IGNORE_CLASS:
+            BIOES_tags.append("O")
+            i += 1
+        else:
+            current_tag = tag
+            first=True
+            num=0
+            while tag == current_tag:
+                if first:
+                    first=False
+                    num+=1
+                    if (i+1) < len(tags) and tags[i+1] == current_tag:
+                        BIOES_tags.append("B-" + current_tag)
+                        i+=1
+                    else:
+                        BIOES_tags.append("S-" + current_tag)
+                        i+=1
+                        break
+                else:
+                    num+=1
+                    BIOES_tags.append("I-" + current_tag)
+                    i+=1
+
+                if i >= len(tags):
+                    break
+                else:
+                    tag = tags[i]
+            
+            if num > 1:
+                BIOES_tags[i-1] = "E" + BIOES_tags[i-1][1:]
+
+
+    assert len(BIOES_tags) == len(tags)
+
+    return BIOES_tags
 
 class PropDataset(data.Dataset):
     def __init__(self, fpath, IsTest=False):
-
         directory = fpath
         dataset = make_dataset(directory)
         if IsTest:
@@ -106,20 +167,19 @@ class PropDataset(data.Dataset):
         flat_words, flat_tags, flat_ids, changed_ids = [], [], [], []
 
         count = 0
-
         for article_w, article_t, article_id in zip(words, tags, ids):
             for sentence, tag, id in zip(article_w, article_t, article_id):
-                
-
+                # Convert into BIOES Tagging Scheme()
+                bioes_tag = convert_to_BIOES(tag)
+                # print(tag, bioes_tag)
+                # print(tag2idx[0])
                 # Seperated them from the groupings
-                changed = [idx2tag[0][tag2idx[0][temp_tag]]
-                           for temp_tag in tag]
+                changed = [idx2tag[0][tag2idx[0][temp_tag]] for temp_tag in bioes_tag]
 
                 # which were article wise to make a list of just sentences
                 if set(changed) == {'O'}:
                     count += 1
                     continue
-
                 else:
                     flat_words.append(sentence)
                     changed_ids.append(changed)
@@ -147,13 +207,13 @@ class PropDataset(data.Dataset):
             sents.append(["[CLS]"] + words + ["[SEP]"])
             tmp_tags = []
 
-            #We here are just making the tags dict, basically and adding tags for the Sep and start tokens
+            # We here are just making the tags dict, basically and adding tags for the Sep and start tokens
 
             if num_task != 2:
                 for i in range(num_task):
                     tmp_tags.append(['O']*len(tags))
                     for j, tag in enumerate(tags):
-                        if tag != 'O' and tag in ["CD", "ST"]:
+                        if tag != 'O' and tag != "<PAD>":
                             tmp_tags[i][j] = tag
                     tags_li[i].append(["<PAD>"] + tmp_tags[i] + ["<PAD>"])
             elif num_task == 2:
@@ -288,3 +348,14 @@ def pad(batch):
 
 # print("###################################")
 # print(getter.__getitem__(0))
+
+if __name__ == "__main__":
+    o = convert_to_BIOES(['Loaded_Language', 'Loaded_Language', 'Loaded_Language', 'O', 'O', 'O', 'O', 'O', 'O', 'O', 'O', 'O', 'O', 'O', 'O', 'O', 'O', 'O', 'O', 'O', 'O', 'O', 'O', 'O', 'O', 'O'])
+    print(o)
+
+    o = convert_to_BIOES(['Flag-Waving', 'Flag-Waving', 'Flag-Waving', 'Flag-Waving', 'Flag-Waving', 'Flag-Waving', 'Flag-Waving', 'Flag-Waving', 'Flag-Waving', 'Flag-Waving'])
+    print(o)
+    
+    o = convert_to_BIOES(['O', 'O', 'O', 'O', 'O', 'O', 'O', 'O', 'O', 'O', 'Exaggeration,Minimisation', 'Exaggeration,Minimisation', 'Exaggeration,Minimisation', 'Exaggeration,Minimisation', 'Exaggeration,Minimisation', 'Exaggeration,Minimisation', 'Exaggeration,Minimisation', 'O', 'O', 'O', 'O', 'O', 'O', 'O', 'O', 'Exaggeration,Minimisation', 'Exaggeration,Minimisation', 'Exaggeration,Minimisation', 'Exaggeration,Minimisation', 'Exaggeration,Minimisation', 'Exaggeration,Minimisation', 'Exaggeration,Minimisation', 'Exaggeration,Minimisation', 'Exaggeration,Minimisation', 'O', 'O', 'O', 'Exaggeration,Minimisation', 'Exaggeration,Minimisation', 'Exaggeration,Minimisation', 'Exaggeration,Minimisation', 'Exaggeration,Minimisation', 'Exaggeration,Minimisation', 'Exaggeration,Minimisation', 'Exaggeration,Minimisation', 'Exaggeration,Minimisation', 'Exaggeration,Minimisation'])
+    print(o)
+

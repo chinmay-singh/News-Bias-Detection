@@ -15,7 +15,6 @@ dev_path = "/data/protechn_corpus_eval/dev"
 assert len(glob.glob(path_data+train_path+text_path)) == len(glob.glob(path_data+train_path+ label_path))  
 
 def parse_label(path):
-
     labels = []
     f= Path(path)
     if not f.exists():
@@ -40,14 +39,12 @@ def parse_label(path):
     else:
         return labels
 
-
 def read(path):
     ids = []
     texts = []
     labels = []
 
     for text_file in glob.glob(path+"/*.txt"):
-
         id = text_file.replace('article', '').replace('.txt','')
         ids.append(id)
 
@@ -82,7 +79,7 @@ def make_dataset(directory):
     res = []
     for text, label in zip(texts, labels):
         # making positive examples
-        tmp = [] 
+        tmp = []
         pos_ind = [0] * len(text)
         for l in label:
             for i, sen in enumerate(text):
@@ -100,9 +97,8 @@ def make_dataset(directory):
         for k, sen in enumerate(text):
             if pos_ind[k] != 1:
                 tmp.append(sen+dummy)
-        res.append(tmp)     
+        res.append(tmp)
     return res
-
 
 def make_bert_testset(dataset):
     words, tags, ids= [], [], []
@@ -227,6 +223,16 @@ def mda(dataset):
         words.append(tmp_doc)
         tags.append(tmp_label)
         ids.append(tmp_id)
+
+if __name__ == "__main__":
+    ret = make_dataset("data/protechn_corpus_eval/train")
+    print(type(ret), len(ret))
+    print("\n\n")
+    [print(r) for r in ret[2]]
+
+    ret = make_bert_dataset(ret)
+    print(type(ret))
+    print(ret[0][2], ret[1][2], ret[2][2])
 
 # c, d, e = make_bert_testset(a)
 # print("########################")
