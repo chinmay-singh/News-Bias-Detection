@@ -235,8 +235,8 @@ def eval(model, iterator, f, criterion, binary_criterion):
         y_pred.append(np.array([tag2idx[i][line.split('\t')[i+1+num_task].strip()] for line in open(f, 'r').read().splitlines() if len(line.split(
             '\t')) > 1 and (line.split('\t')[i+1].strip() in valid_tags) and (line.split('\t')[i+1+num_task].strip() in valid_tags)]))
     
-    print("y_true is {}".format(y_true[0]) )
-    print("y_pred is {}".format(y_pred[0]) )
+    # print("y_true is {}".format(y_true[0]) )
+    # print("y_pred is {}".format(y_pred[0]) )
 
     if params.group_classes:
         guess = []

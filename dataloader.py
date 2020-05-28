@@ -106,6 +106,7 @@ class PropDataset(data.Dataset):
         flat_words, flat_tags, flat_ids, changed_ids = [], [], [], []
 
         count = 0
+        not_dropped=0
 
         for article_w, article_t, article_id in zip(words, tags, ids):
             for sentence, tag, id in zip(article_w, article_t, article_id):
@@ -121,6 +122,7 @@ class PropDataset(data.Dataset):
                     continue
 
                 else:
+                    not_dropped+=1
                     flat_words.append(sentence)
                     changed_ids.append(changed)
 
@@ -128,8 +130,10 @@ class PropDataset(data.Dataset):
 
                     flat_ids.append(id)
         print("{} sentences dropped".format(count))
-        print("sentence is {} \n tag is {} \n id is {} \n changed_ids is {}".format(
-            flat_words[:2], flat_tags[:2], flat_ids[:2], changed_ids[:2]))
+        print("{} sentences NOT dropped".format(not_dropped))
+
+        # print("sentence is {} \n tag is {} \n id is {} \n changed_ids is {}".format(
+        #     flat_words[:2], flat_tags[:2], flat_ids[:2], changed_ids[:2]))
 
         sents, ids = [], []
         tags_li = [[] for _ in range(num_task)]
@@ -278,13 +282,13 @@ def pad(batch):
     return words, x, is_heads, att_mask, tags, y, seqlen
 
 
-# path_data = '.'
-# train_path = "/data/protechn_corpus_eval/train"
-# text_path = "/*.tsv"
-# label_path = "/*.txt"
-# dev_path = "/data/protechn_corpus_eval/dev"
+path_data = '.'
+train_path = "/data/protechn_corpus_eval/train"
+text_path = "/*.tsv"
+label_path = "/*.txt"
+dev_path = "/data/protechn_corpus_eval/dev"
 
-# getter = PropDataset(params.trainset)
+getter = PropDataset(params.trainset)
 
-# print("###################################")
-# print(getter.__getitem__(0))
+print("###################################")
+print(getter.__getitem__(0))
