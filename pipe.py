@@ -9,6 +9,7 @@ from torch.nn.functional import relu, tanh, sigmoid
 from transformers import BertModel, BertConfig
 from torch.nn import CrossEntropyLoss, MSELoss
 from transformers import BertConfig, AdamW, get_linear_schedule_with_warmup
+from transformers.modeling_bert import BertPreTrainedModel
 
 import wandb
 
@@ -96,8 +97,8 @@ class PropDataset(data.Dataset):
         X,Y = read_data(path)
 
         if params.dummy_run:
-            X = X[0]
-            Y = Y[0]
+            X = [X[0]]
+            Y = [Y[0]]
         
         self.tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
 
@@ -105,37 +106,37 @@ class PropDataset(data.Dataset):
 
         tag2idx = {}
         idx2tag = {}
-        tag2idx["Red_Herring"] = 2  # 2 is classify and delete
-        tag2idx["Name_Calling,Labeling"] = 2
-        tag2idx["Reductio_ad_hitlerum"] = 2
-        tag2idx["Repetition"] = 2  # Maybe Put to others class
+        tag2idx["Red_Herring"] = 1  # 1 is classify and delete
+        tag2idx["Name_Calling,Labeling"] = 1
+        tag2idx["Reductio_ad_hitlerum"] = 1
+        tag2idx["Repetition"] = 1  # Maybe Put to others class
 
-        # 3 is the Style Transfer Class
-        tag2idx["Obfuscation,Intentional_Vagueness,Confusion"] = 3
-        tag2idx["Loaded_Language"] = 3
+        # 2 is the Style Transfer Class
+        tag2idx["Obfuscation,Intentional_Vagueness,Confusion"] = 2
+        tag2idx["Loaded_Language"] = 2
 
-        tag2idx["Slogans"] = 1  # 1 is the ignore class 'O'
-        tag2idx["Appeal_to_fear-prejudice"] = 1
-        tag2idx["Doubt"] = 1
-        tag2idx["Exaggeration,Minimisation"] = 1
-        tag2idx["Flag-Waving"] = 1
-        tag2idx["Bandwagon"] = 1
-        tag2idx["Causal_Oversimplification"] = 1
-        tag2idx["Appeal_to_Authority"] = 1
-        tag2idx["Black-and-White_Fallacy"] = 1
-        tag2idx["Thought-terminating_Cliches"] = 1
-        tag2idx["Straw_Men"] = 1
-        tag2idx["Whataboutism"] = 1
+        tag2idx["Slogans"] = 0  # 0 is the ignore class 'O'
+        tag2idx["Appeal_to_fear-prejudice"] = 0
+        tag2idx["Doubt"] = 0
+        tag2idx["Exaggeration,Minimisation"] = 0
+        tag2idx["Flag-Waving"] = 0
+        tag2idx["Bandwagon"] = 0
+        tag2idx["Causal_Oversimplification"] = 0
+        tag2idx["Appeal_to_Authority"] = 0
+        tag2idx["Black-and-White_Fallacy"] = 0
+        tag2idx["Thought-terminating_Cliches"] = 0
+        tag2idx["Straw_Men"] = 0
+        tag2idx["Whataboutism"] = 0
 
-        tag2idx["CD"] = 2
-        tag2idx["O"] = 1
-        tag2idx["ST"] = 3
-        tag2idx["<PAD>"] = 0
+        tag2idx["CD"] = 1
+        tag2idx["O"] = 0
+        tag2idx["ST"] = 2
+        # tag2idx["<PAD>"] = 0
 
-        idx2tag[1] = "O"
-        idx2tag[2] = "CD"
-        idx2tag[3] = "ST"
-        idx2tag[0] = "<PAD>"
+        idx2tag[0] = "O"
+        idx2tag[1] = "CD"
+        idx2tag[2] = "ST"
+        # idx2tag[0] = "<PAD>"
 
         self.tag2dx = tag2idx
         self.idx2tag = idx2tag 
@@ -152,21 +153,41 @@ class PropDataset(data.Dataset):
         tag    = self.tags[index]
         tag_label = self.tag2dx[ tag ]
 
-        input_ids = torch.tensor(self.tokenizer.encode(
-                    words , add_special_tokens=True , do_lower_case = False )).unsqueeze(0).to(params.device)
-       
+        input_ids = self.tokenizer.encode(
+                    words , add_special_tokens=True , do_lower_case = False )
 
-        y = torch.LongTensor( [tag_label] ).unsqueeze(0).to(params.device)
+        if len(input_ids)>210:
+            input_ids = input_ids[:210]
 
-        seq_len = len(input_ids[0])
+        y = [tag_label] 
 
-        att_mask = torch.Tensor([1]*seq_len).to(params.device)
+        seq_len = len(input_ids)
 
-        return input_ids , y , att_mask 
+        att_mask = [1]*seq_len
+
+        return input_ids , y , att_mask , seq_len
 
 # b = PropDataset(dev_path)
 # print(b.__getitem__(0))
 
+def pad(batch):
+
+    def f(x): return [sample[x] for sample in batch] #access the Xth index element of the sample in this batch
+
+    seq_len = f(-1)
+    max_len = 210
+    y = f(1)
+
+    def f(x, seqlen): return [
+        sample[x] + [0] * (seqlen - len(sample[x])) for sample in batch]
+
+    input_ids = torch.LongTensor(f(0,max_len)).to(params.device)
+
+    y = torch.LongTensor(y).to(params.device)
+
+    att_mask = torch.Tensor(f(2,max_len)).to(params.device)
+
+    return input_ids , y, att_mask , seq_len
 
 """
 Model Class
@@ -176,9 +197,10 @@ Model Class
 class BertMultiTaskLearning(BertPreTrainedModel):
     def __init__(self, config):
         super(BertMultiTaskLearning, self).__init__(config)
+        self.num_labels = 3
         self.bert = BertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.classifier = nn.Linear( config.hidden_size, config.num_labels )
+        self.classifier = nn.Linear( config.hidden_size, 3 )
         self.init_weights()
         
 
@@ -198,7 +220,7 @@ class BertMultiTaskLearning(BertPreTrainedModel):
         logits = self.classifier(pooled_output)
 
         # add hidden states and attention if they are here
-        outputs = (logits,) + outputs[2:]
+        outputs = (logits,) + output[2:]
 
         if labels is not None:
             if self.num_labels == 1:
@@ -208,7 +230,7 @@ class BertMultiTaskLearning(BertPreTrainedModel):
 
             else:
                 loss_fct = CrossEntropyLoss()
-                loss = loss_fct( logits.view(-1, self.num_labels) , labels.view(-1) )
+                loss = loss_fct(logits.view(-1, self.num_labels) , labels.view(-1) )
 
             outputs = (loss,) + outputs
 
@@ -238,20 +260,20 @@ if __name__ == "__main__":
 
     model = nn.DataParallel(model)
 
-    model.to(params.dev) 
+    model.to(params.device) 
 
-    train_dataset   =   PropDataset(params.trainset, False)
-    eval_dataset    =   PropDataset(params.validset, True)
+    train_dataset   =   PropDataset(train_path, False)
+    eval_dataset    =   PropDataset(dev_path, True)
 
     train_iter      =   data.DataLoader(dataset=train_dataset,
                                         batch_size= params.batch_size,
                                         shuffle= True,
-                                        num_workers=1)
+                                        collate_fn=pad)
     
     eval_iter       =   data.DataLoader(dataset=eval_dataset,
                                 batch_size=params.batch_size,
                                 shuffle=False,
-                                num_workers=1)
+                                collate_fn=pad)
 
     warmup_proportion = 0.1
     num_train_optimization_steps = int(

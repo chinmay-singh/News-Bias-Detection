@@ -14,19 +14,21 @@ def train(model, iterator, optimizer, scheduler):
 
     for k, batch in enumerate(iterator):
 
-        words, x, is_heads, att_mask, tags, y, seqlens = batch
+        input_ids, y, att_mask, seq_lens = batch
         
 
         optimizer.zero_grad()
 
-        loss = model(x, attention_mask=att_mask, labels = y)
+        outputs = model(input_ids = input_ids, attention_mask=att_mask, labels = y)
 
-        loss.backward()
+        loss = outputs[0]
+
+        loss.mean().backward()
 
         optimizer.step()
         scheduler.step()
 
-        train_losses.append(loss.item())
+        train_losses.append(loss.mean().item())
 
         if k%100 == 0:
             print("step: {}, loss: {}".format(k,loss[0].item()))
@@ -50,7 +52,7 @@ def eval(model, iterator):
 
     with torch.no_grad():
         for _, batch in enumerate(iterator):
-            x,  y, att_mask = batch
+            x,  y, att_mask, seq_len = batch
 
             outputs = model(x, attention_mask=att_mask, labels=y)
 
