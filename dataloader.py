@@ -93,9 +93,12 @@ if params.group_classes:
 
     tag2idx[0]["<PAD>"] = 0
     tag2idx[0]["O"] = 1
+    tag2idx[0]["<START>"] = 10
 
     idx2tag[0][1] = "O"
     idx2tag[0][0] = "<PAD>"
+    idx2tag[0][10] = "<START>"
+
 print(tag2idx, idx2tag)
 
 tokenizer = BertTokenizer.from_pretrained(
@@ -232,6 +235,18 @@ class PropDataset(data.Dataset):
     def __len__(self):
         return len(self.sents)
 
+    def you_shall_follow_bioes(self, t_i):
+        if len(t_i) == 1 or t_i[0] in ["O", "<PAD>", "I-ST", "I-CD"]:
+            return t_i
+        elif t_i[0] in ["B-ST", "B-CD"]:
+            return [t_i[0]] + [("I" + t[1:]) for t in t_i[1:]]
+        elif t_i[0] in ["E-ST", "E-CD"]:
+            return [("I" + t[1:]) for t in t_i[:(len(t_i)-1)]] + [t_i[0]]
+        elif t_i[0] in ["S-ST", "S-CD"]:
+            return ["B" + t_i[0][1:]] + \
+                    [("I" + t[1:]) for t in t_i[1:(len(t_i)-1)]] + \
+                    ["E" + t_i[0][1:]]
+
     def __getitem__(self, idx):
         words = self.sents[idx]  # tokens, tags: string list
         ids = self.ids[idx]  # tokens, tags: string list
@@ -239,6 +254,7 @@ class PropDataset(data.Dataset):
         x, is_heads = [], []  # list of ids
         y = [[] for _ in range(num_task)]  # list of lists of lists
         tt = [[] for _ in range(num_task)]  # list of lists of lists
+
         if num_task != 2:
             for w, *t in zip(words, *tags):
                 tokens = tokenizer.tokenize(w) if w not in (
@@ -249,11 +265,16 @@ class PropDataset(data.Dataset):
                 if len(xx) < len(is_head):
                     xx = xx + [100] * (len(is_head) - len(xx))
 
-                t = [[t[i]] + [t[i]] * (len(tokens) - 1)
+                if w == "[CLS]" and params.crf:
+                    t = ["<START>"]
+
+                t = [self.you_shall_follow_bioes([t[i]] + [t[i]] * (len(tokens) - 1))
                      for i in range(num_task)]
+
 
                 y_tmp = []
                 for i in range(num_task):
+                   
                     y[i].extend([tag2idx[i][each] for each in t[i]])
                     tt[i].extend(t[i])
 
@@ -309,7 +330,7 @@ class PropDataset(data.Dataset):
 
 
 def pad(batch):
-    def f(x): return [sample[x] for sample in batch]
+    f= lambda x: [sample[x] for sample in batch]
     words = f(0)
     is_heads = f(2)
     seqlen = f(-1)

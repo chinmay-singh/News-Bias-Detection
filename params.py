@@ -30,6 +30,6 @@ parser.add_argument("--group_classes", dest="group_classes",default=True, action
 parser.add_argument("--dummy_run", dest="dummy_run", action="store_true", help="To make the model run on only one training sample for debugging")
 parser.add_argument("--device", type=str, default="cuda", help="name of the device to be used for training")
 parser.add_argument("--wandb",  dest="wandb", action="store_true", default= False)
-
+parser.add_argument("--crf", type=bool, default=True, help="whether running CRF or not, default to True. Hardcoded to not work unless True")
 
 params = parser.parse_args()

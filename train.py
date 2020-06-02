@@ -42,7 +42,6 @@ if params.dummy_run:
 dev = params.device
 
 def train(model, iterator, optimizer, criterion, binary_criterion):
-
     check_cuda()
     model.train()
     check_cuda()
@@ -56,8 +55,8 @@ def train(model, iterator, optimizer, criterion, binary_criterion):
         check_cuda()
 
         optimizer.zero_grad()
+        print(type(model))
         logits, _ = model(x, attention_mask=att_mask)
-                                #, 
         loss = []
 
         if num_task == 2:
@@ -70,11 +69,17 @@ def train(model, iterator, optimizer, criterion, binary_criterion):
             loss.append(criterion(logits[0], y[0]))
             loss.append(binary_criterion(logits[1], y[1]))
         else:
-            for i in range(num_task):
-                check_cuda()
-                logits[i] = logits[i].view(-1, logits[i].shape[-1])
-                y[i] = y[i].view(-1).to(dev)
-                loss.append(criterion(logits[i], y[i]))
+            print(logits[0])
+            logits[0] = logits[0].view(-1, logits[0].shape[-1])
+            y[0] = y[0].view(-1).to(dev)
+            print("------")
+            print(y[0].size(), logits[0], logits[0].size())
+
+            if params.crf:
+                loss.append(model.module.forward_alg_loss(logits[0], y[0]))
+                print(loss)
+            else:
+                loss.append(criterion(logits[0], y[0]))
 
         if num_task == 1:
             joint_loss = loss[0]
@@ -97,6 +102,8 @@ def train(model, iterator, optimizer, criterion, binary_criterion):
 
 def eval(model, iterator, f, criterion, binary_criterion):
     model.eval()
+
+    print("EVALUATION:\n\n")
     valid_losses = []
 
     Words, Is_heads = [], []
@@ -106,6 +113,7 @@ def eval(model, iterator, f, criterion, binary_criterion):
     with torch.no_grad():
         for _ , batch in enumerate(iterator):
             words, x, is_heads, att_mask, tags, y, seqlens = batch
+            print(x, tags, y)
             att_mask = torch.Tensor(att_mask)
             logits, y_hats = model(x, attention_mask=att_mask) # logits: (N, T, VOCAB), y: (N, T)
 
@@ -118,17 +126,20 @@ def eval(model, iterator, f, criterion, binary_criterion):
                 loss.append(criterion(logits[0], y[0]))
                 loss.append(binary_criterion(logits[1], y[1]))
             else:
+
+                pass
                 for i in range(num_task):
                     logits[i] = logits[i].view(-1, logits[i].shape[-1]) # (N*T, 2)
                     y[i] = y[i].view(-1).to(dev)
                     loss.append(criterion(logits[i], y[i]))
 
             if num_task == 1:
-                joint_loss = loss[0]
+                pass
+                # joint_loss = loss[0]
             elif num_task == 2:
                 joint_loss = params.alpha*loss[0] + (1-params.alpha)*loss[1]
 
-            valid_losses.append(joint_loss.item())
+            # valid_losses.append(joint_loss.item())
             Words.extend(words)
             Is_heads.extend(is_heads)
 
@@ -136,7 +147,7 @@ def eval(model, iterator, f, criterion, binary_criterion):
                 Tags[i].extend(tags[i])
                 Y[i].extend(y[i].cpu().numpy().tolist())
                 Y_hats[i].extend(y_hats[i].cpu().numpy().tolist())
-    valid_loss = np.average(valid_losses) 
+    # valid_loss = np.average(valid_losses) 
 
     with open(f, 'w') as fout:
         y_hats, preds = [[] for _ in range(num_task)], [[] for _ in range(num_task)]
@@ -287,7 +298,6 @@ def eval(model, iterator, f, criterion, binary_criterion):
         return precision, recall, f1, valid_loss, group_report
 
 if __name__ == "__main__":
-
     if params.wandb:
         wandb.init(project="news_bias", name=params.run)
 
@@ -343,6 +353,7 @@ if __name__ == "__main__":
     # initialize the early_stopping object
     early_stopping = EarlyStopping(patience=params.patience, verbose=True)
 
+    print("\n\n\n\n\nBEHOLD as TRAINING BEGINS")
     for epoch in range(1, params.n_epochs+1):
         print("=========eval at epoch={epoch}=========")
         if not os.path.exists('checkpoints'):
@@ -352,10 +363,9 @@ if __name__ == "__main__":
         fname = os.path.join('checkpoints','epoch_{}_'.format(epoch)+params.run)
         spath = os.path.join('checkpoints','epoch_{}_'.format(epoch)+params.run+".pt")
 
-        # print("For epoch {} cached is {}\n allocated is {}".format(epoch, torch.cuda.memory_cached(0), torch.cuda.memory_allocated(0)))
+        print("For epoch {} cached is {} allocated is {}".format(epoch, torch.cuda.memory_cached(0), torch.cuda.memory_allocated(0)))
 
-        train_loss = train(model_bert, train_iter, optimizer,
-                           criterion, binary_criterion)
+        train_loss = train(model_bert, train_iter, optimizer, criterion, binary_criterion)
 
         avg_train_losses.append(train_loss.item())
 
