@@ -49,12 +49,9 @@ def train(model, iterator, optimizer, criterion, binary_criterion):
 
     for k, batch in enumerate(iterator):
         words, x, is_heads, att_mask, tags, y, seqlens = batch
-        print(att_mask)
-        print(y[0].tolist())
-        asdas()
         check_cuda()
 
-        att_mask = torch.Tensor(att_mask)
+        att_mask = torch.Tensor(att_mask).to(params.device)
         check_cuda()
 
         optimizer.zero_grad()
@@ -73,7 +70,7 @@ def train(model, iterator, optimizer, criterion, binary_criterion):
         else:
             y[0] = y[0].to(dev)
             if params.crf:
-                loss.append(model.module.forward_alg_loss(logits[0], y[0]))
+                loss.append(model.module.forward_alg_loss(logits[0], y[0], att_mask))
             else:
                 loss.append(criterion(logits[0], y[0]))
 
@@ -110,22 +107,20 @@ def eval(model, iterator, f, criterion, binary_criterion):
         for _ , batch in enumerate(iterator):
             words, x, is_heads, att_mask, tags, y, seqlens = batch
             # print(x, tags, y)
-            att_mask = torch.Tensor(att_mask)
+            att_mask = torch.Tensor(att_mask).to(params.device)
             bert_feats, _ = model(x, attention_mask=att_mask) # logits: (N, T, VOCAB), y: (N, T)
 
             y[0] = y[0].to(dev)
-            loss = model.module.forward_alg_loss(bert_feats[0], y[0])
-            y_hats = [model.module._viterbi_decode(bert_feats[0])[1]]
+            loss = model.module.forward_alg_loss(bert_feats[0], y[0], att_mask)
+            y_hats = [model.module._viterbi_decode(bert_feats[0], att_mask)[1]]
 
-            joint_loss = loss
-
-            valid_losses.append(joint_loss.item())
+            valid_losses.append(loss.item())
             Words.extend(words)
             Is_heads.extend(is_heads)
 
             Tags[0].extend(tags[0])
             Y[0].extend(y[0].cpu().numpy().tolist())
-            Y_hats[0].extend(y_hats[0].cpu().numpy().tolist())
+            Y_hats[0].extend(y_hats[0]) 
     valid_loss = np.average(valid_losses) 
     print("+++++++++ VALID LOSS = ", valid_loss)
 
@@ -148,18 +143,23 @@ def eval(model, iterator, f, criterion, binary_criterion):
     print("+++++++++++++++++++++++++++")
     confusion_mat = np.zeros((len(valid_tags), len(valid_tags)))
     if num_task == 1:
-        Y_hats = Y_hats[0]
+        Y_hats = [single_sequence.cpu().tolist() for single_sequence in Y_hats[0]]
         Y = Y[0]
-        y_all = []
-        for single_sequence in Y: 
-            y_all.extend([tags_to_valid[idx2tag[0][y]] for y in single_sequence])
+        # print(Y_hats,"\n\n", Y)
 
         yhat_all = []
-        for single_sequence in Y_hats: 
-            yhat_all.extend([tags_to_valid[idx2tag[0][y]] for y in single_sequence])
+        y_all = []
 
-        assert len(y_all) == len(yhat_all)
+        assert len(Y) == len(Y_hats)
+        for seq_num in range(len(Y)):
+            this_Yhat = Y_hats[seq_num]
+            this_Y = Y[seq_num]
+        
+            yhat_all.extend([tags_to_valid[idx2tag[0][yhat]] for yhat in this_Yhat])
+            y_all.extend([tags_to_valid[idx2tag[0][y]] for y in this_Y[:len(this_Yhat)]])
+
         # print(y_all, "\n", yhat_all, len(y_all))
+        assert len(y_all) == len(yhat_all)
 
         # Confusion Matrix[i, j] where i = ground_truth_idx and j = predicted_idx
         for i in range(len(y_all)):
@@ -196,7 +196,7 @@ def eval(model, iterator, f, criterion, binary_criterion):
 
                 group_report[tag] = this_grp
 
-
+    print(group_report)
     num_correct = confusion_mat[valid_tag2id["ST"], valid_tag2id["ST"]] + \
                     confusion_mat[valid_tag2id["CD"], valid_tag2id["CD"]]
 
@@ -238,7 +238,7 @@ def eval(model, iterator, f, criterion, binary_criterion):
 
 if __name__ == "__main__":
     if params.wandb:
-        wandb.init(project="news_bias_crf", name=params.run)
+        wandb.init(project="news_bias", name=params.run)
 
     model_bert = BertMultiTaskLearning.from_pretrained('bert-base-uncased')
     print("Detected", torch.cuda.device_count(), "GPUs!")

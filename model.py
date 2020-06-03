@@ -54,6 +54,7 @@ class BertMultiTaskLearning(BertPreTrainedModel):
 
             # 5. From SEP tag, go to stop tag only
             self.transitions.data[:, self.sep_id] = -10000.0
+            self.transitions.data[self.stop_label_id, :] = -10000.0
             self.transitions.data[self.stop_label_id, self.sep_id] = 0.0
 
             self.classifier = nn.ModuleList(
@@ -75,16 +76,15 @@ class BertMultiTaskLearning(BertPreTrainedModel):
         self.init_weights()
 
     def _forward_alg(self, feats, pad_mask):  # alpha-recursion to calculate log_prob of all X_bar 
-        # T = self.max_seq_length
         T = feats.shape[1]
         batch_size = feats.shape[0]
         
-        # alpha_recursion,forward, alpha(zt)=p(zt,bar_x_1:t)
+        # alpha(zt)=p(zt,bar_x_1:t)
         log_alpha = torch.Tensor(batch_size, 1, self.num_labels).fill_(-10000.).to(params.device)
-        # normal_alpha_0 : alpha[0]=Ot[0]*self.PIs
+
         # self.start_label has all of the score. it is log,0 is p=1
         log_alpha[:, 0, self.start_label_id] = 0
-        # feats: sentances -> word embedding -> lstm -> MLP -> feats
+
         # feats is the probability of emission, feat.shape=(1,tag_size)
         for t in range(0, T):
             this_pad_mask = pad_mask[:, t].view(-1, 1, 1)
@@ -108,7 +108,6 @@ class BertMultiTaskLearning(BertPreTrainedModel):
         # print(score)
         # print("BATCH_TRANS_SIZE = ", batch_transitions.size())
 
-        # the 0th node is start_label->start_word, the probability of them=1. so t begin with 1.
         prev_labels = torch.tensor([11]).expand(batch_size).to(params.device) # Initially it all starts with <START>
 
         for t in range(0, T):
@@ -124,41 +123,61 @@ class BertMultiTaskLearning(BertPreTrainedModel):
 
         return score + self.transitions[self.stop_label_id, self.sep_id]
 
-    def _viterbi_decode_single(self, feats):
-        '''
-        Max-Product Algorithm or viterbi algorithm, argmax(p(z_0:t|x_0:t))
-        '''
-        
+    def _viterbi_decode(self, feats, masks):
+        batch_size = feats.size()[0]
+        assert masks.size()[0] == batch_size
+ 
+        sequences = []
+        path_costs = []
+        for b in range(batch_size):
+            path_cost, pred_seq = self._viterbi_decode_single(feats[b, :, :].unsqueeze(0), masks[b, :].unsqueeze(0))
+            sequences.append(pred_seq[0, :-1])
+            path_costs.append(path_cost)
+
+        return path_cost, sequences
+
+    def _viterbi_decode_single(self, feats, mask):
+        # Vector Max-Product Algorithm or viterbi algorithm hardcoded to batch size 1, argmax(p(z_0:t|x_0:t))
+
         # T = self.max_seq_length
         T = feats.shape[1]
         batch_size = feats.shape[0]
-
-        # batch_transitions=self.transitions.expand(batch_size,self.num_labels,self.num_labels)
+        assert batch_size == 1
 
         log_delta = torch.Tensor(batch_size, 1, self.num_labels).fill_(-10000.).to(params.device)
         log_delta[:, 0, self.start_label_id] = 0
 
         # psi is for the vaule of the last latent that make P(this_latent) maximum.
-        psi = torch.zeros((batch_size, T, self.num_labels), dtype=torch.long).to(params.device)  # psi[0]=0000 useless
+        psi = torch.zeros((batch_size, T+1, self.num_labels), dtype=torch.long).to(params.device)  # psi[0]=0000 useless
+        path_len = 0
         for t in range(0, T):
+            if mask[0][t] == 0:
+                path_len = t
+                break
             # delta[t][k]=max_z1:t-1( p(x1,x2,...,xt,z1,z2,...,zt-1,zt=k|theta) )
             # delta[t] is the max prob of the path from  z_t-1 to z_t[k]
             log_delta, psi[:, t] = torch.max(self.transitions + log_delta, -1)
             # psi[t][k]=argmax_z1:t-1( p(x1,x2,...,xt,z1,z2,...,zt-1,zt=k|theta) )
             # psi[t][k] is the path choosed from z_t-1 to z_t[k],the value is the z_state(is k) index of z_t-1
             log_delta = (log_delta + feats[:, t]).unsqueeze(1)
-
         # trace back
-        path = torch.zeros((batch_size, T), dtype=torch.long).to(params.device)
+
+        path = torch.zeros((1, path_len+1), dtype=torch.long).to(params.device)
 
         # max p(z1:t,all_x|theta)
-        max_logLL_allz_allx, path[:, -1] = torch.max(log_delta.squeeze(), -1)
 
-        for t in range(T-2, -1, -1):
-            # choose the state of z_t according the state choosed of z_t+1.
+        path_score, psi[:, path_len] = torch.max(log_delta + self.transitions[self.stop_label_id, :], -1)
+        # print(psi[:, path_len], path_len)
+        path[:, path_len] = torch.max(psi[:, path_len], -1)[1]
+
+        for t in range(path_len-1, -1, -1):
+            # print(psi[:, t], t)
+            # choose the state of z_t according the state choosen of z_t+1.
             path[:, t] = psi[:, t+1].gather(-1,path[:, t+1].view(-1,1)).squeeze()
 
-        return max_logLL_allz_allx, path
+        (psi[:, 0].gather(-1,path[:, 0].view(-1,1)).squeeze()).item() == self.start_label_id
+
+        return path_score, path
 
     def forward_alg_loss(self, bert_feats, labels, mask):
         forward_score = self._forward_alg(bert_feats, mask)
@@ -210,23 +229,27 @@ class BertMultiTaskLearning(BertPreTrainedModel):
 
 
 if __name__ == "__main__":
-    torch.manual_seed(124)
-    t = torch.randn(1, 19, 768).expand(2, 19, 768)#.to(params.device)#.expand(24, 160, 12)
+    torch.manual_seed(125344)
+    t = torch.randn(1, 19, 768)#.expand(2, 19, 768)#.to(params.device)#.expand(24, 160, 12)
     # # y = [[]]
     # # for i in range(10):
     # #     y[0].extend([10, 1, 1, 1, 1, 1, 1, 3, 5, 5, 5, 5, 7, 1, 1, 0])
-    y = [[10, 1, 1, 1, 1, 1, 1, 3, 5, 5, 5, 5, 7, 1, 1, 0, 0, 0, 0],
-        [10, 1, 1, 1, 1, 1, 1, 3, 5, 5, 5, 5, 7, 1, 1, 1, 0, 0, 0]]
-    mask=[[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
-            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0]]
+    y = [[10, 1, 1, 1, 1, 1, 1, 3, 5, 5, 5, 5, 7, 1, 1, 0, 0, 0, 0]]#,
+#        [10, 1, 1, 1, 1, 1, 1, 3, 5, 5, 5, 5, 7, 1, 1, 1, 0, 0, 0]]
+    mask=[[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0]]
+#            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0]]
 
     y = torch.tensor(y)#.to(params.device)
     mask = torch.FloatTensor(mask)
-    # print("\n\n", y, "\n", mask, "\n", t[0, 0, :], y.size(), t.size(), mask.size(), mask.dtype)
+    print("\n\n", y, )#"\n", mask, "\n", t[0, 0, :], y.size(), t.size(), mask.size(), mask.dtype)
 
     model_bert = BertMultiTaskLearning.from_pretrained('bert-base-uncased')
     model_bert = model_bert.to(params.device)
 
+
+    import torch.optim as optim
+    optimizer = optim.SGD(model_bert.parameters(), lr=0.00001)
+    import time
     # transitions = torch.zeros(12, 12)
     # print(transitions)
 
@@ -239,25 +262,20 @@ if __name__ == "__main__":
 
     # # print(model_bert.transitions, model_bert.transitions.size())
     
-    import torch.optim as optim
-    optimizer = optim.SGD(model_bert.parameters(), lr=0.00001)
-    # import time
-    # start = time.time()
+
     # loss = model_bert.forward_alg_loss(t, y, mask)
-    # end = time.time()
-    # print(end - start)
     # print(loss)
     # start = time.time()
     # loss.backward()
     # optimizer.step()
     # end = time.time()
-    # print(end - start)
 
     for i in range(500):         
         loss = model_bert.forward_alg_loss(model_bert.classifier[0](t), y, mask)
         loss.backward()
         optimizer.step()
-        print(loss)
+        _, l = (model_bert._viterbi_decode(model_bert.classifier[0](t), mask))
+        print(loss, l)
 
     # print(model_bert.transitions)
     # print(model_bert._forward_alg(model_bert.classifier[0](t), mask))
