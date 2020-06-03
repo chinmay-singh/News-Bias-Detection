@@ -27,16 +27,17 @@ class BertMultiTaskLearning(BertPreTrainedModel):
 
         self.start_label_id = 11
         self.cls_id = 10
-        self.stop_label_id = 0
+        self.sep_id = 0
+        self.stop_label_id = 12
 
         if params.crf:
-            self.tagset_size = 12 # 12 tags including <CLS> <START> <PAD> in BIOES format
+            self.tagset_size = 13 # 13 tags including <CLS> <SEP> <START> <STOP> in BIOES format
             self.num_labels = self.tagset_size
         
             self.transitions = nn.Parameter(
                     torch.randn(self.tagset_size, self.tagset_size))
 
-            # Four statements enforce the constraints for transitions:
+            # Five statements enforce the constraints for transitions:
             # 1. Nothing goes to CLS tag <except> start
             self.transitions.data[self.cls_id, :] = -10000.0
 
@@ -44,11 +45,16 @@ class BertMultiTaskLearning(BertPreTrainedModel):
             self.transitions.data[:, self.start_label_id] = -10000.0
             self.transitions.data[self.cls_id, self.start_label_id] = 0.0 # Start only goes to CLS
 
-            # 3. Never go directly from cls to stop
+            # 3. Never go directly from cls to stop or sep
             self.transitions.data[self.stop_label_id, self.cls_id] = -10000.0
+            self.transitions.data[self.sep_id, self.cls_id] = -10000.0
 
             # 4. From the Stop tag, go nowhere except for stop tag itself
-            self.transitions.data[self.stop_label_id+1:, self.stop_label_id] = -10000.0
+            self.transitions.data[:, self.stop_label_id] = -10000.0
+
+            # 5. From SEP tag, go to stop tag only
+            self.transitions.data[:, self.sep_id] = -10000.0
+            self.transitions.data[self.stop_label_id, self.sep_id] = 0.0
 
             self.classifier = nn.ModuleList(
                 [nn.Linear(config.hidden_size, self.tagset_size)])
@@ -68,11 +74,7 @@ class BertMultiTaskLearning(BertPreTrainedModel):
         
         self.init_weights()
 
-    def _forward_alg(self, feats):
-        '''
-        this also called alpha-recursion or forward recursion, to calculate log_prob of all barX 
-        '''
-        
+    def _forward_alg(self, feats, pad_mask):  # alpha-recursion to calculate log_prob of all X_bar 
         # T = self.max_seq_length
         T = feats.shape[1]
         batch_size = feats.shape[0]
@@ -82,23 +84,20 @@ class BertMultiTaskLearning(BertPreTrainedModel):
         # normal_alpha_0 : alpha[0]=Ot[0]*self.PIs
         # self.start_label has all of the score. it is log,0 is p=1
         log_alpha[:, 0, self.start_label_id] = 0
-        
         # feats: sentances -> word embedding -> lstm -> MLP -> feats
         # feats is the probability of emission, feat.shape=(1,tag_size)
         for t in range(0, T):
-            log_alpha = (log_sum_exp_batch(self.transitions + log_alpha, axis=-1) + feats[:, t]).unsqueeze(1)
-            print(log_alpha)
+            this_pad_mask = pad_mask[:, t].view(-1, 1, 1)
+            log_new_update = (log_sum_exp_batch(self.transitions + log_alpha, axis=-1) + feats[:, t]).unsqueeze(1)
+            log_alpha =  log_new_update * this_pad_mask + log_alpha * (1- this_pad_mask)
         # log_prob of all barX
         log_prob_all_barX = log_sum_exp_batch(log_alpha + self.transitions[self.stop_label_id])
         return log_prob_all_barX
 
-    def _score_sentence(self, feats, label_ids):
-        '''
-        Gives the score of a provided label sequence
-        p(X=w1:t,Zt=tag1:t)=...p(Zt=tag_t|Zt-1=tag_t-1)p(xt|Zt=tag_t)...
-        '''
+    def _score_sentence(self, feats, label_ids, pad_mask):
+        #  Gives the score of a provided label sequence
+        #  p(X=w1:t,Z_t=tag1:t)= ... p(Z_t=tag_t|Z_t-1=tag_t-1)*p(x_t|Z_t=tag_t) ...
 
-        # T = self.max_seq_length
         T = feats.shape[1]
         batch_size = feats.shape[0]
 
@@ -106,22 +105,26 @@ class BertMultiTaskLearning(BertPreTrainedModel):
         batch_transitions = batch_transitions.flatten(1)
 
         score = torch.zeros((feats.shape[0],1)).to(params.device)
+        # print(score)
         # print("BATCH_TRANS_SIZE = ", batch_transitions.size())
 
         # the 0th node is start_label->start_word, the probability of them=1. so t begin with 1.
         prev_labels = torch.tensor([11]).expand(batch_size).to(params.device) # Initially it all starts with <START>
 
         for t in range(0, T):
+            this_pad_mask = pad_mask[:, t].view(-1, 1)
             this_labels = label_ids[:, t]
 
-            score = score + \
-                batch_transitions.gather(-1, (this_labels*self.num_labels+prev_labels).view(-1,1)) \
-                    + feats[:, t].gather(-1, this_labels.view(-1,1)).view(-1,1)
+            transition_score = batch_transitions.gather(-1, (this_labels*self.num_labels+prev_labels).view(-1,1))
+            feats_score = feats[:, t].gather(-1, this_labels.view(-1,1)).view(-1,1)
+            score = score + ((transition_score + feats_score) * this_pad_mask)
+
+            # print(score, t)#, transition_score, feats_score, t)
             prev_labels = this_labels
 
-        return score
+        return score + self.transitions[self.stop_label_id, self.sep_id]
 
-    def _viterbi_decode(self, feats):
+    def _viterbi_decode_single(self, feats):
         '''
         Max-Product Algorithm or viterbi algorithm, argmax(p(z_0:t|x_0:t))
         '''
@@ -158,22 +161,14 @@ class BertMultiTaskLearning(BertPreTrainedModel):
         return max_logLL_allz_allx, path
 
     def forward_alg_loss(self, bert_feats, labels, mask):
-        forward_score = self._forward_alg(bert_feats)
-        # print(forward_score)
+        forward_score = self._forward_alg(bert_feats, mask)
         # p(X=w1:t,Zt=tag1:t)=...p(Zt=tag_t|Zt-1=tag_t-1)p(xt|Zt=tag_t)...
-        gold_score = self._score_sentence(bert_feats, labels)
-        # print(gold_score)
+        gold_score = self._score_sentence(bert_feats, labels, mask)
         # - log[ p(X=w1:t,Zt=tag1:t)/p(X=w1:t) ] = - log[ p(Zt=tag1:t|X=w1:t) ]
         return torch.mean(forward_score - gold_score)
 
-    # def pred(self, bert_feats, input_ids):
-        #     score, label_seq_ids = self._viterbi_decode(bert_feats)
-        #     return score, label_seq_ids
-
-
     def forward(self, input_ids, token_type_ids= None, attention_mask= None, labels = None):
         input_ids = input_ids.to(dev)
-        # token_type_ids =  token_type_ids.to("cuda")
         attention_mask = attention_mask.to(dev)
 
         output = self.bert(input_ids,token_type_ids= token_type_ids,attention_mask = attention_mask)
@@ -213,85 +208,42 @@ class BertMultiTaskLearning(BertPreTrainedModel):
 
         return logits, y_hats
 
-    # def log_sum_exp(vec, batch, tagset_size):
-        #     max_scores = torch.max(vec, 2)[0]
-        #     max_scores_broadcast = max_scores.view(batch, 1, -1).expand(batch, 1, tagset_size)
-        #     logz = torch.log(torch.sum(torch.exp(vec - max_scores_broadcast), axis=2))
-        #     return max_scores + logz
-
-        # def forward_alg_loss(self, feats, tags):
-        #     return _forward_alg(11, self.init_alphas, self.transitions, feats, params.batch_size) - \
-        #             score_sentence(self, feats, tags)
-
-        # def decode():
-        #     do_nothing()
-        #     EROEROEORERE
-        #    WRONG_INDENT
-
-        # def _forward_alg(tagset_size, init_alphas, transitions, feats, batch):
-        #     """Do the forward algorithm to compute the partition function."""
-        #     permuted_feats = feats.permute(1, 0, 2)
-
-        #     # Wrap in a variable so that we will get automatic backprop
-        #     forward_var = init_alphas.repeat(batch, 1, 1)
-
-        #     # Iterate through the sentence
-        #     for feat in permuted_feats:
-        #         alphas_t = []  # The forward tensors at this timestep
-
-        #         for next_tag in range(tagset_size):
-        #             # broadcast the emission score: it is the same regardless of the previous tag
-        #             emit_score = feat[:, next_tag].view(batch, 1, -1).expand(batch, 1, tagset_size)
-
-        #             # the ith entry of trans_score is the score of transitioning to next_tag from i
-        #             trans_score = transitions[next_tag].view(1, -1)
-
-        #             # The ith entry of next_tag_var is the value for the
-        #             # edge (i -> next_tag) before we do log-sum-exp
-        #             next_tag_var = forward_var + trans_score + emit_score
-
-        #             # The forward variable for this tag is log-sum-exp of all the scores.
-        #             alphas_t.append(log_sum_exp(next_tag_var, batch, tagset_size).view(batch, 1))
-
-        #         concatted_alphas = torch.cat(alphas_t, 1).view(batch, 1, -1)
-        #         # assert concatted_alphas.size() == forward_var.size()
-                
-        #         forward_var = concatted_alphas
-            
-        #     terminal_var = forward_var + transitions[0] # 0=STOP/PAD Tag
-        #     alpha = log_sum_exp(terminal_var, batch, tagset_size)
-        #     return alpha
-
 
 if __name__ == "__main__":
-    # torch.manual_seed(124)
-    # t = torch.randn(1, 16, 12).to(params.device)#.expand(24, 160, 12)
+    torch.manual_seed(124)
+    t = torch.randn(1, 19, 768).expand(2, 19, 768)#.to(params.device)#.expand(24, 160, 12)
     # # y = [[]]
     # # for i in range(10):
     # #     y[0].extend([10, 1, 1, 1, 1, 1, 1, 3, 5, 5, 5, 5, 7, 1, 1, 0])
-    # # y = [[10, 1, 1, 1, 1, 1, 3, 3, 5, 5, 5, 5, 7, 1, 1, 0, 0, 0, 0]]
-    # y = torch.tensor(y).to(params.device)
-    # print("\n\n", y, y.size(), t.size())
+    y = [[10, 1, 1, 1, 1, 1, 1, 3, 5, 5, 5, 5, 7, 1, 1, 0, 0, 0, 0],
+        [10, 1, 1, 1, 1, 1, 1, 3, 5, 5, 5, 5, 7, 1, 1, 1, 0, 0, 0]]
+    mask=[[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0]]
 
-    transitions = torch.zeros(12, 12)
-    print(transitions)
+    y = torch.tensor(y)#.to(params.device)
+    mask = torch.FloatTensor(mask)
+    # print("\n\n", y, "\n", mask, "\n", t[0, 0, :], y.size(), t.size(), mask.size(), mask.dtype)
 
-    log_alpha = torch.Tensor(1, 1, 12).fill_(-10000.)#.to(params.device)
-    log_alpha[:, 0, 11] = 0
-    print(log_alpha)
+    model_bert = BertMultiTaskLearning.from_pretrained('bert-base-uncased')
+    model_bert = model_bert.to(params.device)
 
-    print(transitions + log_alpha)
-    print(log_sum_exp_batch(transitions + log_alpha, axis=-1))
+    # transitions = torch.zeros(12, 12)
+    # print(transitions)
 
-    # model_bert = BertMultiTaskLearning.from_pretrained('bert-base-uncased')
-    # model_bert = model_bert.to(params.device)
+    # log_alpha = torch.Tensor(1, 1, 12).fill_(-10000.)#.to(params.device)
+    # log_alpha[:, 0, 11] = 0
+    # print(log_alpha)
+
+    # print(transitions + log_alpha)
+    # print(log_sum_exp_batch(transitions + log_alpha, axis=-1))
+
     # # print(model_bert.transitions, model_bert.transitions.size())
     
-    # # import torch.optim as optim
-    # # optimizer = optim.SGD(model_bert.parameters(), lr=0.00001)
+    import torch.optim as optim
+    optimizer = optim.SGD(model_bert.parameters(), lr=0.00001)
     # import time
     # start = time.time()
-    # loss = model_bert.forward_alg_loss(t, y)
+    # loss = model_bert.forward_alg_loss(t, y, mask)
     # end = time.time()
     # print(end - start)
     # print(loss)
@@ -301,10 +253,14 @@ if __name__ == "__main__":
     # end = time.time()
     # print(end - start)
 
-    # for i in range(500):         
-    #     loss = model_bert.forward_alg_loss(model_bert.classifier[0](t), y)
-    #     loss.backward()
-    #     optimizer.step()
-    #     _, seq = model_bert._viterbi_decode(model_bert.classifier[0](t))
-    #     print(loss, seq, seq.size())
+    for i in range(500):         
+        loss = model_bert.forward_alg_loss(model_bert.classifier[0](t), y, mask)
+        loss.backward()
+        optimizer.step()
+        print(loss)
+
+    # print(model_bert.transitions)
+    # print(model_bert._forward_alg(model_bert.classifier[0](t), mask))
+    # print(model_bert._score_sentence(model_bert.classifier[0](t), y, mask))
+    # print(model_bert.classifier[0](t), y, mask)
 

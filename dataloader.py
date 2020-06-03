@@ -154,9 +154,7 @@ def convert_to_BIOES(tags):
             if num > 1:
                 BIOES_tags[i-1] = "E" + BIOES_tags[i-1][1:]
 
-
     assert len(BIOES_tags) == len(tags)
-
     return BIOES_tags
 
 class PropDataset(data.Dataset):
@@ -310,8 +308,7 @@ class PropDataset(data.Dataset):
 
         for i in range(num_task):
             tags[i] = " ".join(tags[i])
-
-        att_mask = [1] * seqlen
+        att_mask = [1.0] * seqlen
         # print("####  WORDS #####")
         # print(words)
         # print("#### X #####")
@@ -340,6 +337,8 @@ def pad(batch):
         sample[x] + [0] * (seqlen - len(sample[x])) for sample in batch]  # 0: <pad>
     x = torch.LongTensor(f(1, maxlen))
 
+    def f(x, seqlen): return [
+        sample[x] + [0.] * (seqlen - len(sample[x])) for sample in batch]  # 0: <pad>
     att_mask = f(-4, maxlen)
     y = []
     tags = []
