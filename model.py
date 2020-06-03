@@ -35,15 +35,19 @@ class BertMultiTaskLearning(BertPreTrainedModel):
         
             self.transitions = nn.Parameter(
                     torch.randn(self.tagset_size, self.tagset_size))
-            # Three statements enforce the constraints:
-            # From start we transfer to CLS always
-            # From CLS 
-            # to the start tag and we never transfer from the stop tag
+
+            # Four statements enforce the constraints for transitions:
+            # 1. Nothing goes to CLS tag <except> start
             self.transitions.data[self.cls_id, :] = -10000.0
 
+            # 2. Start only transitions to CLS tag
             self.transitions.data[:, self.start_label_id] = -10000.0
-            self.transitions.data[self.cls_id, self.start_label_id] = 0.0
-            
+            self.transitions.data[self.cls_id, self.start_label_id] = 0.0 # Start only goes to CLS
+
+            # 3. Never go directly from cls to stop
+            self.transitions.data[self.stop_label_id, self.cls_id] = -10000.0
+
+            # 4. From the Stop tag, go nowhere except for stop tag itself
             self.transitions.data[self.stop_label_id+1:, self.stop_label_id] = -10000.0
 
             self.classifier = nn.ModuleList(
@@ -74,7 +78,7 @@ class BertMultiTaskLearning(BertPreTrainedModel):
         batch_size = feats.shape[0]
         
         # alpha_recursion,forward, alpha(zt)=p(zt,bar_x_1:t)
-        log_alpha = torch.Tensor(batch_size, 1, self.num_labels).fill_(-10000.).to(self.device)
+        log_alpha = torch.Tensor(batch_size, 1, self.num_labels).fill_(-10000.).to(params.device)
         # normal_alpha_0 : alpha[0]=Ot[0]*self.PIs
         # self.start_label has all of the score. it is log,0 is p=1
         log_alpha[:, 0, self.start_label_id] = 0
@@ -83,6 +87,7 @@ class BertMultiTaskLearning(BertPreTrainedModel):
         # feats is the probability of emission, feat.shape=(1,tag_size)
         for t in range(0, T):
             log_alpha = (log_sum_exp_batch(self.transitions + log_alpha, axis=-1) + feats[:, t]).unsqueeze(1)
+            print(log_alpha)
         # log_prob of all barX
         log_prob_all_barX = log_sum_exp_batch(log_alpha + self.transitions[self.stop_label_id])
         return log_prob_all_barX
@@ -127,12 +132,12 @@ class BertMultiTaskLearning(BertPreTrainedModel):
 
         # batch_transitions=self.transitions.expand(batch_size,self.num_labels,self.num_labels)
 
-        log_delta = torch.Tensor(batch_size, 1, self.num_labels).fill_(-10000.).to(self.device)
+        log_delta = torch.Tensor(batch_size, 1, self.num_labels).fill_(-10000.).to(params.device)
         log_delta[:, 0, self.start_label_id] = 0
-        
+
         # psi is for the vaule of the last latent that make P(this_latent) maximum.
-        psi = torch.zeros((batch_size, T, self.num_labels), dtype=torch.long).to(self.device)  # psi[0]=0000 useless
-        for t in range(1, T):
+        psi = torch.zeros((batch_size, T, self.num_labels), dtype=torch.long).to(params.device)  # psi[0]=0000 useless
+        for t in range(0, T):
             # delta[t][k]=max_z1:t-1( p(x1,x2,...,xt,z1,z2,...,zt-1,zt=k|theta) )
             # delta[t] is the max prob of the path from  z_t-1 to z_t[k]
             log_delta, psi[:, t] = torch.max(self.transitions + log_delta, -1)
@@ -141,7 +146,7 @@ class BertMultiTaskLearning(BertPreTrainedModel):
             log_delta = (log_delta + feats[:, t]).unsqueeze(1)
 
         # trace back
-        path = torch.zeros((batch_size, T), dtype=torch.long).to(self.device)
+        path = torch.zeros((batch_size, T), dtype=torch.long).to(params.device)
 
         # max p(z1:t,all_x|theta)
         max_logLL_allz_allx, path[:, -1] = torch.max(log_delta.squeeze(), -1)
@@ -152,7 +157,7 @@ class BertMultiTaskLearning(BertPreTrainedModel):
 
         return max_logLL_allz_allx, path
 
-    def forward_alg_loss(self, bert_feats, labels):
+    def forward_alg_loss(self, bert_feats, labels, mask):
         forward_score = self._forward_alg(bert_feats)
         # print(forward_score)
         # p(X=w1:t,Zt=tag1:t)=...p(Zt=tag_t|Zt-1=tag_t-1)p(xt|Zt=tag_t)...
@@ -259,23 +264,31 @@ class BertMultiTaskLearning(BertPreTrainedModel):
 
 
 if __name__ == "__main__":
-    torch.manual_seed(124)
-    t = torch.randn(1, 16, 12).to(params.device)#.expand(24, 160, 12)
-    # y = [[]]
-    # for i in range(10):
-    #     y[0].extend([10, 1, 1, 1, 1, 1, 1, 3, 5, 5, 5, 5, 7, 1, 1, 0])
-    y = [[10, 1, 1, 1, 1, 1, 1, 3, 5, 5, 5, 5, 7, 1, 1, 0]]
-    # y = [y[0] for i in range(24)]
-    # y = [[10, 1, 1, 1, 1, 1, 1, 3, 5, 5, 5, 5, 7, 1, 1, 1, 1, 1, 1, 1, 1, 3, 5, 5, 5, 5, 7, 1, 1, 0, 0]]
-    y = torch.tensor(y).to(params.device)
-    print("\n\n", y.size(), t.size())
+    # torch.manual_seed(124)
+    # t = torch.randn(1, 16, 12).to(params.device)#.expand(24, 160, 12)
+    # # y = [[]]
+    # # for i in range(10):
+    # #     y[0].extend([10, 1, 1, 1, 1, 1, 1, 3, 5, 5, 5, 5, 7, 1, 1, 0])
+    # # y = [[10, 1, 1, 1, 1, 1, 3, 3, 5, 5, 5, 5, 7, 1, 1, 0, 0, 0, 0]]
+    # y = torch.tensor(y).to(params.device)
+    # print("\n\n", y, y.size(), t.size())
 
-    model_bert = BertMultiTaskLearning.from_pretrained('bert-base-uncased')
-    model_bert = model_bert.to(params.device)
-    # print(model_bert.transitions, model_bert.transitions.size())
+    transitions = torch.zeros(12, 12)
+    print(transitions)
+
+    log_alpha = torch.Tensor(1, 1, 12).fill_(-10000.)#.to(params.device)
+    log_alpha[:, 0, 11] = 0
+    print(log_alpha)
+
+    print(transitions + log_alpha)
+    print(log_sum_exp_batch(transitions + log_alpha, axis=-1))
+
+    # model_bert = BertMultiTaskLearning.from_pretrained('bert-base-uncased')
+    # model_bert = model_bert.to(params.device)
+    # # print(model_bert.transitions, model_bert.transitions.size())
     
-    # import torch.optim as optim
-    # optimizer = optim.SGD(model_bert.parameters(), lr=0.00001)
+    # # import torch.optim as optim
+    # # optimizer = optim.SGD(model_bert.parameters(), lr=0.00001)
     # import time
     # start = time.time()
     # loss = model_bert.forward_alg_loss(t, y)
@@ -288,11 +301,10 @@ if __name__ == "__main__":
     # end = time.time()
     # print(end - start)
 
-    ll, seq = model_bert._viterbi_decode(t)
-    print(seq, seq.size())
     # for i in range(500):         
-    #     loss = model_bert.forward_alg_loss(t, y)
-    #     print(loss)
+    #     loss = model_bert.forward_alg_loss(model_bert.classifier[0](t), y)
     #     loss.backward()
     #     optimizer.step()
+    #     _, seq = model_bert._viterbi_decode(model_bert.classifier[0](t))
+    #     print(loss, seq, seq.size())
 

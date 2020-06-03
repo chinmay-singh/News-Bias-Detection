@@ -49,13 +49,15 @@ def train(model, iterator, optimizer, criterion, binary_criterion):
 
     for k, batch in enumerate(iterator):
         words, x, is_heads, att_mask, tags, y, seqlens = batch
+        print(att_mask)
+        print(y[0].tolist())
+        asdas()
         check_cuda()
 
         att_mask = torch.Tensor(att_mask)
         check_cuda()
 
         optimizer.zero_grad()
-        print(type(model))
         logits, _ = model(x, attention_mask=att_mask)
         loss = []
 
@@ -69,15 +71,9 @@ def train(model, iterator, optimizer, criterion, binary_criterion):
             loss.append(criterion(logits[0], y[0]))
             loss.append(binary_criterion(logits[1], y[1]))
         else:
-            print(logits[0])
-            logits[0] = logits[0].view(-1, logits[0].shape[-1])
-            y[0] = y[0].view(-1).to(dev)
-            print("------")
-            print(y[0].size(), logits[0], logits[0].size())
-
+            y[0] = y[0].to(dev)
             if params.crf:
                 loss.append(model.module.forward_alg_loss(logits[0], y[0]))
-                print(loss)
             else:
                 loss.append(criterion(logits[0], y[0]))
 
@@ -113,185 +109,128 @@ def eval(model, iterator, f, criterion, binary_criterion):
     with torch.no_grad():
         for _ , batch in enumerate(iterator):
             words, x, is_heads, att_mask, tags, y, seqlens = batch
-            print(x, tags, y)
+            # print(x, tags, y)
             att_mask = torch.Tensor(att_mask)
-            logits, y_hats = model(x, attention_mask=att_mask) # logits: (N, T, VOCAB), y: (N, T)
+            bert_feats, _ = model(x, attention_mask=att_mask) # logits: (N, T, VOCAB), y: (N, T)
 
-            loss = []
-            if num_task == 2 or masking:
-                for i in range(num_task):
-                    logits[i] = logits[i].view(-1, logits[i].shape[-1]) # (N*T, 2)
-                y[0] = y[0].view(-1).to(dev)
-                y[1] = y[1].float().to(dev)
-                loss.append(criterion(logits[0], y[0]))
-                loss.append(binary_criterion(logits[1], y[1]))
-            else:
+            y[0] = y[0].to(dev)
+            loss = model.module.forward_alg_loss(bert_feats[0], y[0])
+            y_hats = [model.module._viterbi_decode(bert_feats[0])[1]]
 
-                pass
-                for i in range(num_task):
-                    logits[i] = logits[i].view(-1, logits[i].shape[-1]) # (N*T, 2)
-                    y[i] = y[i].view(-1).to(dev)
-                    loss.append(criterion(logits[i], y[i]))
+            joint_loss = loss
 
-            if num_task == 1:
-                pass
-                # joint_loss = loss[0]
-            elif num_task == 2:
-                joint_loss = params.alpha*loss[0] + (1-params.alpha)*loss[1]
-
-            # valid_losses.append(joint_loss.item())
+            valid_losses.append(joint_loss.item())
             Words.extend(words)
             Is_heads.extend(is_heads)
 
-            for i in range(num_task):
-                Tags[i].extend(tags[i])
-                Y[i].extend(y[i].cpu().numpy().tolist())
-                Y_hats[i].extend(y_hats[i].cpu().numpy().tolist())
-    # valid_loss = np.average(valid_losses) 
+            Tags[0].extend(tags[0])
+            Y[0].extend(y[0].cpu().numpy().tolist())
+            Y_hats[0].extend(y_hats[0].cpu().numpy().tolist())
+    valid_loss = np.average(valid_losses) 
+    print("+++++++++ VALID LOSS = ", valid_loss)
 
-    with open(f, 'w') as fout:
-        y_hats, preds = [[] for _ in range(num_task)], [[] for _ in range(num_task)]
-        if num_task == 1:
-            for words, is_heads, tags[0], y_hats[0] in zip(Words, Is_heads, *Tags, *Y_hats):
-                for i in range(num_task):
-                    y_hats[i] = [hat for head, hat in zip(is_heads, y_hats[i]) if head == 1]
-                    preds[i] = [idx2tag[i][hat] for hat in y_hats[i]]
-                fout.write(words.split()[0])
-                fout.write("\n")
-                for w, t1, p_1 in zip(words.split()[2:-1], tags[0].split()[1:-1], preds[0][1:-1]):
-                    fout.write("{}\t{}\t{}\n".format(w, idx2tag[0][tag2idx[0][t1]], p_1))
-                fout.write("\n")
+    valid_tags = ["<START>", "O", "CD", "ST", "<PAD>"]
+    valid_tag2id = {"<START>": 0, "O": 1, "CD": 2, "ST": 3,"<PAD>": 4}
+    id2valid_tag = {id_: valid_tag for valid_tag, id_ in valid_tag2id.items()}
+    tags_to_valid = {
+                        "B-ST": "ST",
+                        "S-ST": "ST",
+                        "I-ST": "ST",
+                        "E-ST": "ST",
+                        "B-CD": "CD",
+                        "S-CD": "CD",
+                        "I-CD": "CD",
+                        "E-CD": "CD",
+                        "O": "O",
+                        "<START>": "<START>",
+                        "<PAD>": "<PAD>"
+                    }
+    print("+++++++++++++++++++++++++++")
+    confusion_mat = np.zeros((len(valid_tags), len(valid_tags)))
+    if num_task == 1:
+        Y_hats = Y_hats[0]
+        Y = Y[0]
+        y_all = []
+        for single_sequence in Y: 
+            y_all.extend([tags_to_valid[idx2tag[0][y]] for y in single_sequence])
 
-        elif num_task == 2:
-            false_neg = 0
-            false_pos = 0
-            true_neg = 0
-            true_pos = 0
-            for words, is_heads, tags[0], tags[1], y_hats[0], y_hats[1] in zip(Words, Is_heads, *Tags, *Y_hats):
-                y_hats[0] = [hat for head, hat in zip(is_heads, y_hats[0]) if head == 1]
-                preds[0] = [idx2tag[0][hat] for hat in y_hats[0]]
-                preds[1] = idx2tag[1][y_hats[1]]
+        yhat_all = []
+        for single_sequence in Y_hats: 
+            yhat_all.extend([tags_to_valid[idx2tag[0][y]] for y in single_sequence])
 
-                if tags[1].split()[1:-1][0] == 'Non-prop' and preds[1] == 'Non-prop':
-                    true_neg += 1
-                elif tags[1].split()[1:-1][0] == 'Non-prop' and preds[1] == 'Prop':
-                    false_pos += 1
-                elif tags[1].split()[1:-1][0] == 'Prop' and preds[1] == 'Prop':
-                    true_pos += 1
-                elif tags[1].split()[1:-1][0] == 'Prop' and preds[1] == 'Non-prop':
-                    false_neg += 1
+        assert len(y_all) == len(yhat_all)
+        # print(y_all, "\n", yhat_all, len(y_all))
 
-                fout.write(words.split()[0])
-                fout.write("\n")
-                for w, t1, p_1 in zip(words.split()[2:-1], tags[0].split()[1:-1], preds[0][1:-1]):
-                    fout.write("{} {} {} {} {}\n".format(w,t1,tags[1].split()[1:-1][0],p_1,preds[1]))
-                fout.write("\n")
-            try:
-                precision = true_pos / (true_pos + false_pos)
-            except ZeroDivisionError:
-                precision = 1.0
-            try:
-                recall = true_pos / (true_pos + false_neg)
-            except ZeroDivisionError:
-                recall = 1.0
-            try:
-                f1 = 2 *(precision*recall) / (precision + recall)
-            except ZeroDivisionError:
-                if precision*recall==0:
-                    f1=1.0
+        # Confusion Matrix[i, j] where i = ground_truth_idx and j = predicted_idx
+        for i in range(len(y_all)):
+            confusion_mat[valid_tag2id[y_all[i]], valid_tag2id[yhat_all[i]]] += 1
+
+        print(confusion_mat)
+
+        group_report = {}
+        if params.group_classes:
+            for tag, idx in valid_tag2id.items():
+                this_grp = {}
+                this_grp["TP"] = confusion_mat[idx, idx]
+                this_grp["FP"] = np.sum(confusion_mat[:, idx]) - this_grp["TP"]
+                this_grp["FN"] = np.sum(confusion_mat[idx, :]) - this_grp["TP"]
+                
+                tp_plus_fp = this_grp["TP"] + this_grp["FP"]
+                if tp_plus_fp == 0.:
+                    this_grp["Prec"] = 0.
                 else:
-                    f1=0.0
-            print("sen_pre", precision)
-            print("sen_rec", recall)
-            print("sen_f1", f1)
-            false_neg = false_pos = true_neg = true_pos = precision = recall = f1 = 0
+                    this_grp["Prec"] = this_grp["TP"] / tp_plus_fp
 
-    ## calc metric
-    y_true, y_pred = [], []
-
-    '''
-    SOme error in the writing of file is being made debug this later
-    '''
-
-    valid_tags = ["CD","O","ST", "<PAD>"]
-
-    for i in range(num_task):
-        y_true.append(np.array([tag2idx[i][line.split('\t')[i+1].strip()] for line in open(
-            f, 'r').read().splitlines() if (len(line.split('\t')) > 1) and (line.split('\t')[i+1].strip() in valid_tags)
-             and (line.split('\t')[i+1+num_task].strip() in valid_tags)]))
-
-        y_pred.append(np.array([tag2idx[i][line.split('\t')[i+1+num_task].strip()] for line in open(f, 'r').read().splitlines() if len(line.split(
-            '\t')) > 1 and (line.split('\t')[i+1].strip() in valid_tags) and (line.split('\t')[i+1+num_task].strip() in valid_tags)]))
-
-    print("y_true is {}".format(y_true[0]) )
-    print("y_pred is {}".format(y_pred[0]) )
-
-    if params.group_classes:
-        guess = []
-        ans = []
-        a = open(f, 'r').read().splitlines()
-        for line in a:
-            if len(line.split('\t')) > 1:
-                b = line.split('\t')[1].strip() 
-                c = line.split('\t')[2].strip()
-                if (b not in valid_tags) or (c not in valid_tags):
-                    continue
+                tp_plus_fn = this_grp["TP"] + this_grp["FN"]
+                if tp_plus_fn == 0.:
+                    this_grp["Recall"] = 0.
                 else:
-                    ans.append(b)
-                    guess.append(c)
+                    this_grp["Recall"] = this_grp["TP"] / tp_plus_fn
 
-        group_report = sklearn.metrics.classification_report(
-            ans, guess, labels=["CD", "ST", "O","<PAD>"], output_dict=True)
+                prec_plus_rec = this_grp["Prec"] + this_grp["Recall"]
+                if prec_plus_rec == 0.:
+                    this_grp["f1-score"] = 0.
+                else:
+                    this_grp["f1-score"] = 2 * this_grp["Prec"] * this_grp["Recall"] \
+                                        / prec_plus_rec
 
-    num_predicted, num_correct, num_gold = 0, 0, 0
-    if num_task != 2:
-        for i in range(num_task):
-            num_predicted += len(y_pred[i][y_pred[i]>1])
-            num_correct += (np.logical_and(y_true[i]==y_pred[i], y_true[i]>1)).astype(np.int).sum()
-            num_gold += len(y_true[i][y_true[i]>1])
+                group_report[tag] = this_grp
 
-    elif num_task == 2:
-        num_predicted += len(y_pred[0][y_pred[0]>1])
-        num_correct += (np.logical_and(y_true[0]==y_pred[0], y_true[0]>1)).astype(np.int).sum()
-        num_gold += len(y_true[0][y_true[0]>1])
 
-    print("num_predicted:{}".format(num_predicted))
-    print("num_correct:{}".format(num_correct))
-    print("num_gold:{}".format(num_gold))
+    num_correct = confusion_mat[valid_tag2id["ST"], valid_tag2id["ST"]] + \
+                    confusion_mat[valid_tag2id["CD"], valid_tag2id["CD"]]
 
-    try:
+    num_predicted = np.sum(confusion_mat[:, valid_tag2id["ST"]]) + \
+                    np.sum(confusion_mat[:, valid_tag2id["CD"]])
+
+    num_gold = np.sum(confusion_mat[valid_tag2id["ST"], :]) + \
+                np.sum(confusion_mat[valid_tag2id["CD"], :])
+
+    # print("num_predicted:{}".format(num_predicted))
+    # print("num_correct:{}".format(num_correct))
+    # print("num_gold:{}".format(num_gold))
+
+    if num_predicted == 0.0:
+        precision = 0.0
+    else:
         precision = num_correct / num_predicted
-    except ZeroDivisionError:
-        precision = 1.0
 
-    try:
+    if num_predicted == 0.0:
+        recall = 0.0
+    else:
         recall = num_correct / num_gold
-    except ZeroDivisionError:
-        recall = 1.0
 
-    try:
+    if precision + recall == 0:
+        f1 = 0.0
+    else:
         f1 = 2*precision*recall / (precision + recall)
-    except ZeroDivisionError:
-        if precision*recall==0:
-            f1=1.0
-        else:
-            f1=0
 
     final = f + ".P%.4f_R%.4f_F1%.4f" %(precision, recall, f1)
-
-    with open(final, 'w') as fout:
-        result = open(f, "r").read()
-        fout.write("{}\n".format(result))
-
-        fout.write("precision={:4f}\n".format(precision))
-        fout.write("recall={:4f}\n".format(recall))
-        fout.write("f1={:4f}\n".format(f1))
-
-    os.remove(f)
 
     print("precision=%.4f"%precision)
     print("recall=%.4f"%recall)
     print("f1=%.4f"%f1)
+
     if not params.group_classes:
         return precision, recall, f1, valid_loss
     else:
@@ -299,10 +238,10 @@ def eval(model, iterator, f, criterion, binary_criterion):
 
 if __name__ == "__main__":
     if params.wandb:
-        wandb.init(project="news_bias", name=params.run)
+        wandb.init(project="news_bias_crf", name=params.run)
 
     model_bert = BertMultiTaskLearning.from_pretrained('bert-base-uncased')
-    print("Detect ", torch.cuda.device_count(), "GPUs!")
+    print("Detected", torch.cuda.device_count(), "GPUs!")
     model_bert = nn.DataParallel(model_bert)
     model_bert = model_bert.to(dev)
 
@@ -353,7 +292,6 @@ if __name__ == "__main__":
     # initialize the early_stopping object
     early_stopping = EarlyStopping(patience=params.patience, verbose=True)
 
-    print("\n\n\n\n\nBEHOLD as TRAINING BEGINS")
     for epoch in range(1, params.n_epochs+1):
         print("=========eval at epoch={epoch}=========")
         if not os.path.exists('checkpoints'):
@@ -393,11 +331,11 @@ if __name__ == "__main__":
                      f'valid_loss: {valid_loss:.5f}')
         print(print_msg)
 
-        early_stopping(-1*f1, model_bert, spath)
+        # early_stopping(-1*f1, model_bert, spath)
 
-        if early_stopping.early_stop:
-            print("Early stopping")
-            break
+        # if early_stopping.early_stop:
+        #     print("Early stopping")
+        #     break
 
     res = os.path.join('results', timestr)
     # load the last checkpoint with the best model
