@@ -62,7 +62,13 @@ def read_data(path, isTest=False):
         else:
             if set(temp_tags) == {"O"}:
                 count += 1
-                continue
+
+                if count<100:                               ###Adding 100 samples of the O class
+                    X.append(" ".join(temp_line))
+                    Y.append("O")
+                    continue
+                else:
+                    continue
             
             X.append(" ".join(temp_line))
 
@@ -96,9 +102,11 @@ class PropDataset(data.Dataset):
         
         X,Y = read_data(path)
 
+        X = X[:]
+        Y = Y[:]
         if params.dummy_run:
-            X = [X[0]]
-            Y = [Y[0]]
+            X = X[:32]
+            Y = Y[:32]
         
         self.tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
 
@@ -153,17 +161,30 @@ class PropDataset(data.Dataset):
         tag    = self.tags[index]
         tag_label = self.tag2dx[ tag ]
 
+        # print("words are",words)
+
         input_ids = self.tokenizer.encode(
                     words , add_special_tokens=True , do_lower_case = False )
 
-        if len(input_ids)>210:
+        seq_len = len(input_ids)
+
+        # print("IDs are",input_ids)
+
+        if seq_len<210:
+            input_ids = input_ids+[100]*(210-seq_len)
+            att_mask = [1]*seq_len+[0]*(210-seq_len)
+        else:
             input_ids = input_ids[:210]
+            att_mask = [1]*210
 
         y = [tag_label] 
 
-        seq_len = len(input_ids)
+        
+        
 
-        att_mask = [1]*seq_len
+        input_ids = torch.LongTensor(input_ids).to(params.device)
+        y = torch.LongTensor(y).to(params.device)
+        att_mask = torch.Tensor(att_mask).to(params.device)
 
         return input_ids , y , att_mask , seq_len
 
@@ -182,10 +203,17 @@ def pad(batch):
         sample[x] + [0] * (seqlen - len(sample[x])) for sample in batch]
 
     input_ids = torch.LongTensor(f(0,max_len)).to(params.device)
+    # print("Input Ids Shape is",input_ids.shape)
+    
 
-    y = torch.LongTensor(y).to(params.device)
+    y = torch.LongTensor(y).unsqueeze(0).to(params.device)
+
+    # print("Y label shape is ", y.shape)
+
 
     att_mask = torch.Tensor(f(2,max_len)).to(params.device)
+
+    # print("Attention Mask shape is",att_mask.shape)
 
     return input_ids , y, att_mask , seq_len
 
@@ -209,6 +237,7 @@ class BertMultiTaskLearning(BertPreTrainedModel):
         # input_ids = input_ids.to(params.device)
 
         # attention_mask = attention_mask.to(params.device)
+        print("Shape is ",input_ids.shape)
 
         output = self.bert(
                     input_ids, token_type_ids=token_type_ids, attention_mask=attention_mask)
@@ -267,13 +296,11 @@ if __name__ == "__main__":
 
     train_iter      =   data.DataLoader(dataset=train_dataset,
                                         batch_size= params.batch_size,
-                                        shuffle= True,
-                                        collate_fn=pad)
+                                        shuffle= True)
     
     eval_iter       =   data.DataLoader(dataset=eval_dataset,
                                 batch_size=params.batch_size,
-                                shuffle=False,
-                                collate_fn=pad)
+                                shuffle=False)
 
     warmup_proportion = 0.1
     num_train_optimization_steps = int(
@@ -334,14 +361,16 @@ if __name__ == "__main__":
         # idx2tag[2] = "CD"
         # idx2tag[3] = "ST"
         # idx2tag[0] = "<PAD>"
-
+        print("CD F1 is {}\n ST F1 is {}\n O F1 is {}\n".format(
+            group_report["1"]["f1-score"], group_report["2"]["f1-score"], 
+            group_report["0"]["f1-score"]))
 
 
         if params.wandb:
             wandb.log({"Training Loss": train_loss.item(), "Validation Loss": valid_loss.item(
             ), "Precision": precision, "Recall": recall, "F1": f1,
-             "CD_F1": group_report["2"]["f1-score"], "ST_F1": group_report["3"]["f1-score"],
-            "O_F1": group_report["1"]["f1-score"]})
+             "CD_F1": group_report["1"]["f1-score"], "ST_F1": group_report["2"]["f1-score"],
+            "O_F1": group_report["0"]["f1-score"]})
 
         
         epoch_len = len(str(params.n_epochs))

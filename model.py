@@ -21,8 +21,12 @@ class BertMultiTaskLearning(BertPreTrainedModel):
 
         # self.classifier = nn.ModuleList([nn.Linear(config.hidden_size, len(VOCAB[i])) for i in range(num_task)])
         
-        self.classifier = nn.ModuleList(
-            [nn.Linear(config.hidden_size, 4)])
+        self.classifier1 = nn.Linear(config.hidden_size,int(config.hidden_size/2))
+        self.classifier2 = nn.Linear(int(config.hidden_size/2),4)
+        self.relu = nn.ReLU()
+
+        # self.classifier = nn.ModuleList(
+        #     [nn.Linear(config.hidden_size, 4)])
 
         # self.apply(self._init_bert_weights)
         self.masking_gate = nn.Linear(2,1)
@@ -41,7 +45,9 @@ class BertMultiTaskLearning(BertPreTrainedModel):
         pooled_output = self.dropout(output[1])
 
         if num_task == 1:
-            logits = [self.classifier[i](sequence_output) for i in range(num_task)]
+            logits = self.classifier1(sequence_output)
+            logits = self.relu(logits)
+            logits = [self.classifier2(logits)]
         
         elif num_task ==2:
             token_level = self.classifier[0](sequence_output)

@@ -47,6 +47,8 @@ dev = params.device
 def train(model, iterator, optimizer, criterion, binary_criterion):
 
     check_cuda()
+
+
     model.train()
     # print(model)
     check_cuda()
@@ -335,7 +337,8 @@ if __name__ == "__main__":
     model_bert = model_bert.to(dev)
 
     # print("cached is {}\n allocated is {}".format(torch.cuda.memory_cached(0), torch.cuda.memory_allocated(0)))
-
+    if params.wandb:
+        wandb.watch(model_bert)
 
     train_dataset = PropDataset(params.trainset, False)
     eval_dataset = PropDataset(params.validset, True)

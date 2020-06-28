@@ -58,37 +58,38 @@ for i in range(num_task):
 
 
 if params.group_classes:
-    tag2idx[0]["Red_Herring"] = 2  # 2 is classify and delete
-    tag2idx[0]["Name_Calling,Labeling"] = 2
-    tag2idx[0]["Reductio_ad_hitlerum"] = 2
-    tag2idx[0]["Repetition"] = 2  # Maybe Put to others class
+    tag2idx[0]["Red_Herring"] = 1  # 1  is classify and delete
+    tag2idx[0]["Name_Calling,Labeling"] = 1
+    tag2idx[0]["Reductio_ad_hitlerum"] = 1
+      # Maybe Put to others class
 
-    # 3 is the Style Transfer Class
-    tag2idx[0]["Obfuscation,Intentional_Vagueness,Confusion"] = 3
-    tag2idx[0]["Loaded_Language"] = 3
+    # 2 is the Style Transfer Class
+    tag2idx[0]["Obfuscation,Intentional_Vagueness,Confusion"] = 2
+    tag2idx[0]["Loaded_Language"] = 2
 
-    tag2idx[0]["Slogans"] = 1  # 1 is the ignore class 'O'
-    tag2idx[0]["Appeal_to_fear-prejudice"] = 1
-    tag2idx[0]["Doubt"] = 1
-    tag2idx[0]["Exaggeration,Minimisation"] = 1
-    tag2idx[0]["Flag-Waving"] = 1
-    tag2idx[0]["Bandwagon"] = 1
-    tag2idx[0]["Causal_Oversimplification"] = 1
-    tag2idx[0]["Appeal_to_Authority"] = 1
-    tag2idx[0]["Black-and-White_Fallacy"] = 1
-    tag2idx[0]["Thought-terminating_Cliches"] = 1
-    tag2idx[0]["Straw_Men"] = 1
-    tag2idx[0]["Whataboutism"] = 1
+    tag2idx[0]["Repetition"] = 0
+    tag2idx[0]["Slogans"] = 0  # 0 is the ignore class 'O'
+    tag2idx[0]["Appeal_to_fear-prejudice"] = 0
+    tag2idx[0]["Doubt"] = 0
+    tag2idx[0]["Exaggeration,Minimisation"] = 0
+    tag2idx[0]["Flag-Waving"] = 0
+    tag2idx[0]["Bandwagon"] = 0
+    tag2idx[0]["Causal_Oversimplification"] = 0
+    tag2idx[0]["Appeal_to_Authority"] = 0
+    tag2idx[0]["Black-and-White_Fallacy"] = 0
+    tag2idx[0]["Thought-terminating_Cliches"] = 0
+    tag2idx[0]["Straw_Men"] = 0
+    tag2idx[0]["Whataboutism"] = 0
 
-    tag2idx[0]["CD"] = 2
-    tag2idx[0]["O"] = 1
-    tag2idx[0]["ST"] = 3
-    tag2idx[0]["<PAD>"] = 0
+    tag2idx[0]["CD"] = 1
+    tag2idx[0]["O"] = 0
+    tag2idx[0]["ST"] = 2
+    tag2idx[0]["<PAD>"] = 3
 
-    idx2tag[0][1] = "O"
-    idx2tag[0][2] = "CD"
-    idx2tag[0][3] = "ST"
-    idx2tag[0][0] = "<PAD>"
+    idx2tag[0][0] = "O"
+    idx2tag[0][1] = "CD"
+    idx2tag[0][2] = "ST"
+    idx2tag[0][3] = "<PAD>"
 
 tokenizer = BertTokenizer.from_pretrained(
     'bert-base-cased', do_lower_case=False)

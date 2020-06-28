@@ -62,7 +62,7 @@ def eval(model, iterator):
 
             y_hats = logits.argmax(-1)
 
-            valid_losses.append(loss.item())
+            valid_losses.append(loss.mean().item())
 
             Y.extend(y.cpu().numpy().tolist())
             Y_hats.extend(y_hats.cpu().numpy().tolist())
