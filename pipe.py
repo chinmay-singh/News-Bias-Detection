@@ -12,16 +12,11 @@ from transformers import BertConfig, AdamW, get_linear_schedule_with_warmup
 from transformers.modeling_bert import BertPreTrainedModel
 
 import wandb
-
 from early_stopping import EarlyStopping
-
 from routines import train, eval
-
 
 train_path = "./data/train.txt"
 dev_path = "./data/dev.txt"
-
-
 
 def read_data(path, isTest=False):
     """
@@ -39,8 +34,6 @@ def read_data(path, isTest=False):
     X, Y
     Where X is the sentence list and Y is the non 'O' Ignore tag
     """
-    
-    
 
     temp_line = []
     temp_tags = []
@@ -49,21 +42,17 @@ def read_data(path, isTest=False):
     count = 0
     
     a = open(path,'r').readlines()
-    
     for i in a:
-
         i = i.strip()
         
         if bool(i):
             temp_line.append(i.split()[0])
             temp_tags.append(i.split()[1])
-        
-        
         else:
             if set(temp_tags) == {"O"}:
                 count += 1
 
-                if count<100:                               ###Adding 100 samples of the O class
+                if count < 100:                               ### Adding 100 samples of the O class
                     X.append(" ".join(temp_line))
                     Y.append("O")
                     continue
@@ -71,17 +60,13 @@ def read_data(path, isTest=False):
                     continue
             
             X.append(" ".join(temp_line))
-
-
             Y.append( list(filter(("O").__ne__, temp_tags))[0] )
 
             # print(temp_tags)
-
             temp_line = []
             temp_tags = []
     
     print(count," dropped")
-    
     return (X, Y)
 
 # a = read_data(dev_path)
@@ -90,14 +75,11 @@ def read_data(path, isTest=False):
 
 
 class PropDataset(data.Dataset):
-
     """
     Dataloader class\n
     Calls the read_data funciton\n
 
     """
-
-
     def __init__(self, path , isTest=False):
         
         X,Y = read_data(path)
@@ -165,7 +147,6 @@ class PropDataset(data.Dataset):
 
         input_ids = self.tokenizer.encode(
                     words , add_special_tokens=True , do_lower_case = False )
-
         seq_len = len(input_ids)
 
         # print("IDs are",input_ids)
@@ -179,9 +160,6 @@ class PropDataset(data.Dataset):
 
         y = [tag_label] 
 
-        
-        
-
         input_ids = torch.LongTensor(input_ids).to(params.device)
         y = torch.LongTensor(y).to(params.device)
         att_mask = torch.Tensor(att_mask).to(params.device)
@@ -192,7 +170,6 @@ class PropDataset(data.Dataset):
 # print(b.__getitem__(0))
 
 def pad(batch):
-
     def f(x): return [sample[x] for sample in batch] #access the Xth index element of the sample in this batch
 
     seq_len = f(-1)
@@ -204,15 +181,10 @@ def pad(batch):
 
     input_ids = torch.LongTensor(f(0,max_len)).to(params.device)
     # print("Input Ids Shape is",input_ids.shape)
-    
-
     y = torch.LongTensor(y).unsqueeze(0).to(params.device)
-
     # print("Y label shape is ", y.shape)
 
-
     att_mask = torch.Tensor(f(2,max_len)).to(params.device)
-
     # print("Attention Mask shape is",att_mask.shape)
 
     return input_ids , y, att_mask , seq_len
@@ -220,8 +192,6 @@ def pad(batch):
 """
 Model Class
 """
-
-
 class BertMultiTaskLearning(BertPreTrainedModel):
     def __init__(self, config):
         super(BertMultiTaskLearning, self).__init__(config)
@@ -230,21 +200,16 @@ class BertMultiTaskLearning(BertPreTrainedModel):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear( config.hidden_size, 3 )
         self.init_weights()
-        
 
     def forward(self, input_ids, token_type_ids=None, attention_mask=None, labels=None):
-
         # input_ids = input_ids.to(params.device)
-
         # attention_mask = attention_mask.to(params.device)
         print("Shape is ",input_ids.shape)
 
         output = self.bert(
                     input_ids, token_type_ids=token_type_ids, attention_mask=attention_mask)
-        
     
         pooled_output = self.dropout(output[1])
-        
     
         logits = self.classifier(pooled_output)
 
@@ -263,32 +228,20 @@ class BertMultiTaskLearning(BertPreTrainedModel):
 
             outputs = (loss,) + outputs
 
-
-
         return outputs  # (loss), logits, (hidden_states), (attentions)
-
-
-
-
-
 
 
 """
 The main Runnning 
 """
-
-
 if __name__ == "__main__":
-
     if params.wandb:
         wandb.init(project="news_bias", name=params.run)
     
     model = BertMultiTaskLearning.from_pretrained('bert-base-uncased')
-
     print("Detected ", torch.cuda.device_count(), "GPUs!")
 
     model = nn.DataParallel(model)
-
     model.to(params.device) 
 
     train_dataset   =   PropDataset(train_path, False)
@@ -297,7 +250,6 @@ if __name__ == "__main__":
     train_iter      =   data.DataLoader(dataset=train_dataset,
                                         batch_size= params.batch_size,
                                         shuffle= True)
-    
     eval_iter       =   data.DataLoader(dataset=eval_dataset,
                                 batch_size=params.batch_size,
                                 shuffle=False)
@@ -332,12 +284,9 @@ if __name__ == "__main__":
     early_stopping = EarlyStopping(patience=params.patience, verbose=True)
 
 
-
-
     """
-    Beggining of the Training Loop
+    Beginning of the Training Loop
     """
-
     for epoch in range(1,params.n_epochs):
 
         print("==========Running Epoch {}==========".format(epoch))
