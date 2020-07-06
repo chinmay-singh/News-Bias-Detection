@@ -65,9 +65,9 @@ def read_data(path, isTest=False):
             temp_lexi.append(list(map(float, (i.split()[3:]))))
             senti = float(i.split()[2])
         else:
-            if set(temp_tags) == {"O"}:
+            if set(temp_tags) == {"O"} and isTest==False:
                 count += 1
-                if count < 100:                               ### Adding 100 samples of the O class
+                if count < 20:                               ### Adding 100 samples of the O class
                     if params.sentence_level:
                         X.append(" ".join(temp_line))
                         Y.append("O")
@@ -104,7 +104,7 @@ class PropDataset(data.Dataset):
     """
     def __init__(self, path, isTest=False):
         
-        (X, Y, Sentiment, Lexicons) = read_data(path)
+        (X, Y, Sentiment, Lexicons) = read_data(path, isTest)
         print(len(X), len(Y), len(Sentiment), len(Lexicons))
         print(X[:2], Y[:2], Sentiment[:2], Lexicons[:2])
         
@@ -243,7 +243,7 @@ class BertMultiTaskLearning(BertPreTrainedModel):
         if params.group_classes:
             self.num_labels = 4
         else:
-            self.num_labels = 20
+            self.num_labels = len(train_dataset.idx2tag.keys()) - 1
 
         self.bert = BertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
@@ -315,15 +315,18 @@ The main Runnning
 if __name__ == "__main__":
     if params.wandb:
         wandb.init(project="news_bias", name=params.run)
-    
+
+    train_dataset = PropDataset(train_path, False)
+    eval_dataset = PropDataset(dev_path, True)
+
     model = BertMultiTaskLearning.from_pretrained('bert-base-uncased')
     print("Detected ", torch.cuda.device_count(), "GPUs!")
 
     model = nn.DataParallel(model)
-    model.to(params.device) 
+    model.to(params.device)
+    if params.wandb:
+        wandb.watch(model)
 
-    train_dataset = PropDataset(train_path, False)
-    eval_dataset = PropDataset(dev_path, True)
 
     train_iter = data.DataLoader(dataset=train_dataset, batch_size= params.batch_size, shuffle= True)
     eval_iter = data.DataLoader(dataset=eval_dataset, batch_size=params.batch_size, shuffle=False)
@@ -362,7 +365,7 @@ if __name__ == "__main__":
     early_stopping = EarlyStopping(patience=params.patience, verbose=True)
 
     # Eval before beginning
-    # _, _, _, _, _ = eval(model=model, iterator=eval_iter, criterion=criterion) 
+    _ = eval(model=model, iterator=eval_iter, criterion=criterion) 
 
     """
     Beginning of the Training Loop
@@ -379,7 +382,9 @@ if __name__ == "__main__":
         # spath = os.path.join('checkpoints','epoch_{}_'.format(epoch)+params.run+".pt")
 
         train_loss = train(model, iterator=train_iter, optimizer=optimizer, scheduler=scheduler, criterion=criterion)
-
+        if params.dummy_run:
+            print(train_loss)
+            continue
         precision, recall, f1, valid_loss, group_report = eval(model=model, iterator=eval_iter, criterion=criterion) 
 
         if params.group_classes:
@@ -395,12 +400,7 @@ if __name__ == "__main__":
         else:
             print(f"F1 = {f1:.5f} precision = {precision:.5f} recall = {recall:.5f}")
 
-            train_dataset.tag2idx
-            wandb_log = {train_dataset.idx2tag[i] + " F1": group_report[str(i)]['f1-score'] for i in range(19)}
-            wandb_log["Precision"] = precision
-            wandb_log["Recall"] = recall
-            wandb_log["F1"] = f1
-    
+            wandb_log = {}    
             if params.sentence_level:
                 wandb_log["Training Loss"] = np.average(train_loss).item()
                 wandb_log["Validation Loss"] = np.average(valid_loss).item()
@@ -414,6 +414,15 @@ if __name__ == "__main__":
                 wandb_log["Validation Label Loss"] = valid_loss[1]
                 wandb_log["Validation Sentiment Loss"] = valid_loss[2]
                 wandb_log["Validation Lexicon Loss"] = valid_loss[3]
+
+                wandb_log["Avg F1"] = sum([group_report[str(i)]['f1-score'] for i in range(19)])/19
+                wandb_log["Avg Precision"] = sum([group_report[str(i)]['precision'] for i in range(19)])/19
+                wandb_log["Avg Recall"] = sum([group_report[str(i)]['recall'] for i in range(19)])/19
+            wandb_log["Precision"] = precision
+            wandb_log["Recall"] = recall
+            wandb_log["F1"] = f1
+            for i in range(19):
+                wandb_log[train_dataset.idx2tag[i] + " F1"] = group_report[str(i)]['f1-score']
 
             if params.wandb:
                 wandb.log(wandb_log)

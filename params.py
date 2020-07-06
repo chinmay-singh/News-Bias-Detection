@@ -13,7 +13,7 @@ parser.add_argument("--batch_size", type=int, default=16)
 parser.add_argument("--lr", type=float, default=3e-5)
 parser.add_argument("--alpha", type=float, default=0.9)
 parser.add_argument("--multitask_feat_dims", type=int, default=512)
-parser.add_argument("--n_epochs", type=int, default=20)
+parser.add_argument("--n_epochs", type=int, default=30)
 parser.add_argument("--patience", type=int, default=7)
 parser.add_argument("--training", dest="training", action="store_true")
 parser.add_argument("--checkdir", type=str, default="checkpoints")
@@ -36,8 +36,8 @@ parser.add_argument("--wandb",  dest="wandb", action="store_true", default= Fals
 parser.add_argument("--sentence_level", type=bool, default=False, help="Calculate loss on sentence level, or on token level.")
 
 # Losses
-parser.add_argument("--lexical_loss_wt", type=int, default=10, help="Have lexical loss")
+parser.add_argument("--lexical_loss_wt", type=int, default=0, help="Weight for lexical loss")
 parser.add_argument("--lexical_ignore_range", type=float, default=0.01, help="Only ground truth values (> 0.5 + range) and ( < 0.5 - range) be considered for loss.")
-parser.add_argument("--sentiment_loss_wt", type=int, default=1, help="Have sentiment loss")
+parser.add_argument("--sentiment_loss_wt", type=int, default=0, help="Weight for sentiment loss")
 
 params = parser.parse_args()
