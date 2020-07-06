@@ -1,8 +1,13 @@
 # TODO
-# 1. Group Classes
-# 2. Token vs Sentence Level classification
-# 3. Auxilliary Loss with options, masks for V 
 # Last step: Integrate CRF for propaganda labels
+
+# To try:
+#   Using SGD with large number of epochs only for label_loss
+#   Using SGD without momentum only for sentiment_loss
+#   Using SGD without momentum only for lexicon_loss
+#   Sum instead of mean for nn.CrossEntropyLoss
+#   Weighing in nn.CrossEntropyLoss
+#   Run for only Sentiment model
 
 import torch
 from torch.utils import data
@@ -26,6 +31,11 @@ train_path = "./data/train_senti_lex.txt"
 dev_path = "./data/dev_senti_lex.txt"
 torch.manual_seed(params.seed)
 random.seed(params.seed)
+
+IGNORE_TAGS = ["Bandwagon", "Red_Herring", "Causal_Oversimplification",
+        "Obfuscation,Intentional_Vagueness,Confusion", "Repetition",
+        "Appeal_to_Authority", "Straw_Men", "Thought-terminating_Cliches"]
+
 
 def read_data(path, isTest=False):
     """
@@ -61,7 +71,10 @@ def read_data(path, isTest=False):
         
         if bool(i):
             temp_line.append(i.split()[0])
-            temp_tags.append(i.split()[1])
+            if i.split()[1] in IGNORE_TAGS:
+                temp_tags.append("IGNORE")
+            else:
+                temp_tags.append(i.split()[1])
             temp_lexi.append(list(map(float, (i.split()[3:]))))
             senti = float(i.split()[2])
         else:
@@ -121,13 +134,18 @@ class PropDataset(data.Dataset):
         tag2idx = {}
         idx2tag = {}
 
-        tag2idx["Red_Herring"] = 1  # 1 is classify and delete
+
+        IGNORE_TAGS = ["Bandwagon", "Red_Herring", "Causal_Oversimplification",
+            "Obfuscation,Intentional_Vagueness,Confusion", "Repetition",
+            "Appeal_to_Authority", "Straw_Men", "Thought-terminating_Cliches"]
+
+        # tag2idx["Red_Herring"] = 1  # 1 is classify and delete
         tag2idx["Name_Calling,Labeling"] = 1
         tag2idx["Reductio_ad_hitlerum"] = 1
-        tag2idx["Repetition"] = 1  # Maybe Put to others class
+        # tag2idx["Repetition"] = 1  # Maybe Put to others class
 
         # 2 is the Style Transfer Class
-        tag2idx["Obfuscation,Intentional_Vagueness,Confusion"] = 2
+        # tag2idx["Obfuscation,Intentional_Vagueness,Confusion"] = 2
         tag2idx["Loaded_Language"] = 2
 
         tag2idx["Slogans"] = 0  # 0 is the ignore class 'O'
@@ -135,12 +153,12 @@ class PropDataset(data.Dataset):
         tag2idx["Doubt"] = 0
         tag2idx["Exaggeration,Minimisation"] = 0
         tag2idx["Flag-Waving"] = 0
-        tag2idx["Bandwagon"] = 0
-        tag2idx["Causal_Oversimplification"] = 0
-        tag2idx["Appeal_to_Authority"] = 0
+        # tag2idx["Bandwagon"] = 0
+        # tag2idx["Causal_Oversimplification"] = 0
+        # tag2idx["Appeal_to_Authority"] = 0
         tag2idx["Black-and-White_Fallacy"] = 0
-        tag2idx["Thought-terminating_Cliches"] = 0
-        tag2idx["Straw_Men"] = 0
+        # tag2idx["Thought-terminating_Cliches"] = 0
+        # tag2idx["Straw_Men"] = 0
         tag2idx["Whataboutism"] = 0
 
         if params.group_classes:
@@ -157,8 +175,10 @@ class PropDataset(data.Dataset):
             labels = list(tag2idx.keys())
             tag2idx = {key:idx+1 for idx, key in enumerate(labels)}
             tag2idx["O"] = 0
-            tag2idx["<PAD>"] = len(labels)+1
+            tag2idx["IGNORE"] = len(labels)+1
+            tag2idx["<PAD>"] = len(labels)+2
             idx2tag = {value:key for key, value in tag2idx.items()}
+            print(tag2idx)
 
         self.tag2idx = tag2idx
         self.idx2tag = idx2tag 
@@ -171,7 +191,6 @@ class PropDataset(data.Dataset):
 
     def __getitem__(self, index):
         words   = self.sents[index]
-        # print(" ".join(words))
         tags    = self.tags[index]
         lexicon_sequence = self.lexicons[index]
         sentiment = self.sentiments[index]
@@ -225,14 +244,23 @@ class PropDataset(data.Dataset):
         less_by = 210 - len(lexicon_sequence)
         y += [self.tag2idx["<PAD>"]] * less_by
         lexicon_sequence += [[0.5, 0.5, 0.5]] * less_by
+
+        y_for_loss = []
+        for i in y:
+            if i == self.tag2idx["IGNORE"]:
+                y_for_loss.append(self.tag2idx["O"])
+            else:
+                y_for_loss.append(i)
+        y_for_loss = torch.LongTensor(y_for_loss).to(params.device)
         y = torch.LongTensor(y).to(params.device)
         lexicon_sequence = torch.Tensor(lexicon_sequence).to(params.device)
 
-        return input_ids, y, att_mask, lexicon_sequence, sentiment, seq_len
+        return input_ids, y, att_mask, lexicon_sequence, sentiment, seq_len, y_for_loss
 
 # b = PropDataset(dev_path)
-# x = b.__getitem__(0)
-# print(x, "\n", list(map(lambda x: x.shape , x[:-1])), '\n', list(map(lambda x: x.type(), x[:-1])))
+# for i in range(96, 100):
+#     x = b.__getitem__(i)
+#     print(x[1], x[-1], i)#, x[-1])#, "\n", list(map(lambda x: x.shape , x[:-1])), '\n', list(map(lambda x: x.type(), x[:-1])))
 # exit()
 """
 Model Class
@@ -243,7 +271,7 @@ class BertMultiTaskLearning(BertPreTrainedModel):
         if params.group_classes:
             self.num_labels = 4
         else:
-            self.num_labels = len(train_dataset.idx2tag.keys()) - 1
+            self.num_labels = len(train_dataset.idx2tag.keys()) - 2 # Ignore Pad and IGNORE class
 
         self.bert = BertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
@@ -328,7 +356,7 @@ if __name__ == "__main__":
         wandb.watch(model)
 
 
-    train_iter = data.DataLoader(dataset=train_dataset, batch_size= params.batch_size, shuffle= True)
+    train_iter = data.DataLoader(dataset=train_dataset, batch_size= params.batch_size, shuffle=True)
     eval_iter = data.DataLoader(dataset=eval_dataset, batch_size=params.batch_size, shuffle=False)
 
     warmup_proportion = 0.1
@@ -348,14 +376,14 @@ if __name__ == "__main__":
     #                      lr=params.lr,
     #                      warmup=warmup_proportion,
     #                      t_total=num_train_optimization_steps)
-
+    # optimizer = torch.optim.SGD(optimizer_grouped_parameters, lr=params.lr)
     optimizer = AdamW(optimizer_grouped_parameters,
                       lr=params.lr, correct_bias=True)
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=int(
         warmup_proportion*num_train_optimization_steps), num_training_steps=num_train_optimization_steps)
 
-    ignore_index = 3 if params.group_classes else 19
-    criterion = {'label_crit': torch.nn.CrossEntropyLoss(ignore_index=ignore_index , reduction='mean'),
+    ignore_index = 3 if params.group_classes else train_dataset.tag2idx["<PAD>"]
+    criterion = {'label_crit': torch.nn.CrossEntropyLoss(ignore_index=ignore_index, reduction='mean'),
                 'sentiment_crit': torch.nn.MSELoss(reduction='mean'),
                 'lexicon_crit': torch.nn.MSELoss(reduction='none')
                }
@@ -415,13 +443,14 @@ if __name__ == "__main__":
                 wandb_log["Validation Sentiment Loss"] = valid_loss[2]
                 wandb_log["Validation Lexicon Loss"] = valid_loss[3]
 
-                wandb_log["Avg F1"] = sum([group_report[str(i)]['f1-score'] for i in range(19)])/19
-                wandb_log["Avg Precision"] = sum([group_report[str(i)]['precision'] for i in range(19)])/19
-                wandb_log["Avg Recall"] = sum([group_report[str(i)]['recall'] for i in range(19)])/19
+                num_labels = len(train_dataset.idx2tag.keys()) - 2
+                wandb_log["Avg F1"] = sum([group_report[str(i)]['f1-score'] for i in range(num_labels)])/num_labels
+                wandb_log["Avg Precision"] = sum([group_report[str(i)]['precision'] for i in range(num_labels)])/num_labels
+                wandb_log["Avg Recall"] = sum([group_report[str(i)]['recall'] for i in range(num_labels)])/num_labels
             wandb_log["Precision"] = precision
             wandb_log["Recall"] = recall
             wandb_log["F1"] = f1
-            for i in range(19):
+            for i in range(num_labels):
                 wandb_log[train_dataset.idx2tag[i] + " F1"] = group_report[str(i)]['f1-score']
 
             if params.wandb:

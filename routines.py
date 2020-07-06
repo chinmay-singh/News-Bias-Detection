@@ -15,7 +15,7 @@ def train(model, iterator, optimizer, scheduler, criterion):
         if params.sentence_level:
             input_ids, y, att_mask, seq_lens = batch
         else:
-            input_ids, y, att_mask, lexicon_sequence, sentiment, seq_len = batch
+            input_ids, y, att_mask, lexicon_sequence, sentiment, seq_len, y_for_loss = batch
 
         optimizer.zero_grad()
 
@@ -33,7 +33,7 @@ def train(model, iterator, optimizer, scheduler, criterion):
         else:
             outputs, sentiment_preds, lexical_preds = model(input_ids, att_mask)
 
-            label_loss = criterion['label_crit'](outputs.view(-1, outputs.size(-1)), y.view(-1))
+            label_loss = criterion['label_crit'](outputs.view(-1, outputs.size(-1)), y_for_loss.view(-1))
 
             senti_loss = criterion['sentiment_crit'](sentiment_preds, sentiment)
 
@@ -149,11 +149,11 @@ def eval(model, iterator, criterion):
                 Y.extend(y.cpu().numpy().tolist())
                 Y_hats.extend(y_hats.cpu().numpy().tolist())
             else:
-                input_ids, y, att_mask, lexicon_sequence, sentiment, seq_len = batch
+                input_ids, y, att_mask, lexicon_sequence, sentiment, seq_len, y_for_loss = batch
 
                 outputs, sentiment_preds, lexical_preds = model(input_ids, att_mask)
 
-                label_loss = criterion['label_crit'](outputs.view(-1, outputs.size(-1)), y.view(-1))
+                label_loss = criterion['label_crit'](outputs.view(-1, outputs.size(-1)), y_for_loss.view(-1))
 
                 senti_loss = criterion['sentiment_crit'](sentiment_preds, sentiment)
 
@@ -163,7 +163,6 @@ def eval(model, iterator, criterion):
                 lexi_loss = torch.sum(lexi_loss) / torch.sum(lexical_mask) # Average over non zero values
 
                 loss = label_loss + (params.sentiment_loss_wt * senti_loss) + (params.lexical_loss_wt * lexi_loss)
-
                 y_hats = outputs.argmax(-1).view(-1)
                 valid_losses.append([loss.item(), label_loss.item(), params.sentiment_loss_wt * senti_loss.item(),
                                         params.lexical_loss_wt * lexi_loss.item()])
