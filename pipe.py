@@ -376,14 +376,17 @@ if __name__ == "__main__":
     #                      lr=params.lr,
     #                      warmup=warmup_proportion,
     #                      t_total=num_train_optimization_steps)
-    # optimizer = torch.optim.SGD(optimizer_grouped_parameters, lr=params.lr)
     optimizer = AdamW(optimizer_grouped_parameters,
                       lr=params.lr, correct_bias=True)
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=int(
         warmup_proportion*num_train_optimization_steps), num_training_steps=num_train_optimization_steps)
 
+    weighing_classes = [0.6947, 1.92532, 3.46476, 1.54582, 3.72027, 2.02282, 1.43475, 2.20959, 2.54352, 2.45998, 2.97847]
+    weighing_classes = torch.Tensor(weighing_classes).to(params.device)
+    # {0: 0.6947, 6: 1.43475, 3: 1.54582, 1: 1.92532, 5: 2.02282, 7: 2.20959, 9: 2.45998, 8: 2.54352, 10: 2.97847, 2: 3.46476, 4: 3.72027}
+    
     ignore_index = 3 if params.group_classes else train_dataset.tag2idx["<PAD>"]
-    criterion = {'label_crit': torch.nn.CrossEntropyLoss(ignore_index=ignore_index, reduction='mean'),
+    criterion = {'label_crit': torch.nn.CrossEntropyLoss(weight=weighing_classes, ignore_index=ignore_index, reduction='mean'),
                 'sentiment_crit': torch.nn.MSELoss(reduction='mean'),
                 'lexicon_crit': torch.nn.MSELoss(reduction='none')
                }
@@ -393,7 +396,7 @@ if __name__ == "__main__":
     early_stopping = EarlyStopping(patience=params.patience, verbose=True)
 
     # Eval before beginning
-    _ = eval(model=model, iterator=eval_iter, criterion=criterion) 
+    _ = eval(model=model, iterator=train_iter, criterion=criterion) 
 
     """
     Beginning of the Training Loop
