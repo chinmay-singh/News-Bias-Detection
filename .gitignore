@@ -1,0 +1,4 @@
+.DS*
+.vscode
+.vs_code
+__pycache__
