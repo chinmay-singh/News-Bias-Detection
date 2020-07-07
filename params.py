@@ -8,7 +8,7 @@ text_path = "/*.tsv"
 label_path = "/*.txt"
 dev_path = "/data/protechn_corpus_eval/dev"
 
-parser.add_argument("--seed", type=int, default=42)
+parser.add_argument("--seed", type=int, default=94522)
 parser.add_argument("--batch_size", type=int, default=16)
 parser.add_argument("--lr", type=float, default=3e-5)
 parser.add_argument("--alpha", type=float, default=0.9)

@@ -202,22 +202,24 @@ class PropDataset(data.Dataset):
             input_ids = self.tokenizer.convert_tokens_to_ids(["[CLS]"])
             tag_labels = [self.tag2idx["<PAD>"]]
             lexicons_subworded = [[0.5, 0.5, 0.5]]
+            is_heads = [False]
 
             for w, t, l in zip(words, map(lambda x: self.tag2idx[x], tags), lexicon_sequence):
                 tokens = self.tokenizer.tokenize(w)
                 xx = self.tokenizer.convert_tokens_to_ids(tokens)
 
-                is_head = [1] + [0] * (len(tokens) - 1)
+                is_head = [True] + [False] * (len(tokens) - 1)
                 if len(xx) < len(is_head):
                     xx = xx + [100] * (len(is_head) - len(xx))
 
                 tag_labels.extend([t] * len(tokens))
                 lexicons_subworded.extend([l] * len(tokens))
                 input_ids.extend(xx)
-
+                is_heads.extend(is_head)
             input_ids.append(self.tokenizer.convert_tokens_to_ids("[SEP]"))
             tag_labels.append(self.tag2idx["<PAD>"])
             lexicons_subworded.append([0.5, 0.5, 0.5])
+            is_heads.append(False)
 
             lexicon_sequence = lexicons_subworded
 
@@ -244,6 +246,7 @@ class PropDataset(data.Dataset):
         less_by = 210 - len(lexicon_sequence)
         y += [self.tag2idx["<PAD>"]] * less_by
         lexicon_sequence += [[0.5, 0.5, 0.5]] * less_by
+        is_heads += [False] * less_by
 
         y_for_loss = []
         for i in y:
@@ -251,16 +254,17 @@ class PropDataset(data.Dataset):
                 y_for_loss.append(self.tag2idx["O"])
             else:
                 y_for_loss.append(i)
+
         y_for_loss = torch.LongTensor(y_for_loss).to(params.device)
         y = torch.LongTensor(y).to(params.device)
         lexicon_sequence = torch.Tensor(lexicon_sequence).to(params.device)
-
-        return input_ids, y, att_mask, lexicon_sequence, sentiment, seq_len, y_for_loss
+        is_heads = torch.BoolTensor(is_heads).to("cpu")
+        return input_ids, y, att_mask, lexicon_sequence, sentiment, seq_len, y_for_loss, is_heads
 
 # b = PropDataset(dev_path)
 # for i in range(96, 100):
 #     x = b.__getitem__(i)
-#     print(x[1], x[-1], i)#, x[-1])#, "\n", list(map(lambda x: x.shape , x[:-1])), '\n', list(map(lambda x: x.type(), x[:-1])))
+#     print(x[1], x[-1], x[1].shape, x[-1].shape, i)#, x[-1])#, "\n", list(map(lambda x: x.shape , x[:-1])), '\n', list(map(lambda x: x.type(), x[:-1])))
 # exit()
 """
 Model Class
@@ -397,6 +401,7 @@ if __name__ == "__main__":
 
     # Eval before beginning
     _ = eval(model=model, iterator=train_iter, criterion=criterion) 
+    _ = eval(model=model, iterator=eval_iter, criterion=criterion) 
 
     """
     Beginning of the Training Loop

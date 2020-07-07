@@ -15,7 +15,7 @@ def train(model, iterator, optimizer, scheduler, criterion):
         if params.sentence_level:
             input_ids, y, att_mask, seq_lens = batch
         else:
-            input_ids, y, att_mask, lexicon_sequence, sentiment, seq_len, y_for_loss = batch
+            input_ids, y, att_mask, lexicon_sequence, sentiment, seq_len, y_for_loss, is_heads = batch
 
         optimizer.zero_grad()
 
@@ -70,7 +70,10 @@ def count_seqs(seq, O_idx=0):
 
     return mod_T
 
-def metric(Y, Y_hats, O_idx=0):    
+
+# This metric is implementation from the 2019 paper by Goivanni et. al. of Fine-Grained Analysis of Propaganda in News Article
+# Not used as per official code by propaganda.qcri.org
+def paper_metric(Y, Y_hats, O_idx=0):    
     mod_T = count_seqs(Y)
     mod_S = count_seqs(Y_hats)
 
@@ -127,19 +130,43 @@ def metric(Y, Y_hats, O_idx=0):
   
     return P_metric, R_metric, F_metric
 
+
+def metric(Y, Y_hats):
+    num_predicted = len(Y_hats[Y_hats > 0])
+    num_correct = (np.logical_and(Y==Y_hats, Y > 0)).astype(np.int).sum()
+    num_gold = len(Y[Y > 0])
+
+    if num_predicted == 0:
+        precision = 0.0
+    else:
+        precision = num_correct / num_predicted
+    
+    if num_gold == 0:
+        raise "Num golds should not be zero"
+    else:
+        recall = num_correct / num_gold
+
+    if (precision + recall) == 0:
+        f1 = 0.0
+    else:
+        f1 = (2 * precision * recall) / (precision + recall)
+    return precision, recall, f1, num_predicted, num_correct, num_gold
+
+
 def eval(model, iterator, criterion):
     model.eval()
 
     valid_losses = []
-    Y = [ ]
-    Y_hats = [ ]
+    Y = []
+    Y_hats = []
+    All_is_heads = []
 
     with torch.no_grad():
         for _, batch in enumerate(iterator):
             if params.sentence_level:
                 input_ids, y, att_mask, seq_lens = batch
 
-                outputs = model(x, attention_mask=att_mask, labels=y)
+                outputs = model(input_ids, attention_mask=att_mask, labels=y)
                 loss = outputs[0]
                 logits = outputs[1]
 
@@ -149,7 +176,7 @@ def eval(model, iterator, criterion):
                 Y.extend(y.cpu().numpy().tolist())
                 Y_hats.extend(y_hats.cpu().numpy().tolist())
             else:
-                input_ids, y, att_mask, lexicon_sequence, sentiment, seq_len, y_for_loss = batch
+                input_ids, y, att_mask, lexicon_sequence, sentiment, seq_len, y_for_loss, is_heads = batch
 
                 outputs, sentiment_preds, lexical_preds = model(input_ids, att_mask)
 
@@ -166,16 +193,20 @@ def eval(model, iterator, criterion):
                 y_hats = outputs.argmax(-1).view(-1)
                 valid_losses.append([loss.item(), label_loss.item(), params.sentiment_loss_wt * senti_loss.item(),
                                         params.lexical_loss_wt * lexi_loss.item()])
+                All_is_heads.extend(is_heads.view(-1).cpu().tolist())
                 Y.extend(y.view(-1).cpu().tolist())
                 Y_hats.extend(y_hats.cpu().tolist())
 
-    print(Counter(Y), Counter(Y_hats))
+    print(len(All_is_heads))
+    assert len(All_is_heads) == len(Y)
+    assert len(All_is_heads) == len(Y_hats)
+    print(Counter(Y), Counter(Y_hats), Counter(All_is_heads))
+
     if params.sentence_level == False:
         new_Y, new_Y_hats = [], []
 
-        pad_idx = iterator.dataset.tag2idx['<PAD>']
         for i in range(len(Y)):
-            if Y[i] != pad_idx:
+            if All_is_heads[i] == True:
                 new_Y.append(Y[i])
                 new_Y_hats.append(Y_hats[i])
         assert len(new_Y) == len(new_Y_hats)
@@ -183,14 +214,21 @@ def eval(model, iterator, criterion):
         Y = new_Y
         Y_hats = new_Y_hats
 
+    assert len(Y) == len(Y_hats)
+    assert len(Y) == sum(All_is_heads)
     print(Counter(Y), Counter(Y_hats))
 
     group_report = sklearn.metrics.classification_report(
                     Y, Y_hats, output_dict=True)
 
+    Y = np.asarray(Y)
+    Y_hats = np.asarray(Y_hats)
+
     if params.sentence_level == False:
-        precision, recall, f1 = metric(Y, Y_hats)
-        print(metric(Y, Y), metric(Y_hats, Y_hats))
+        # print(Y[:100])
+        # print(Y_hats[:100])
+        precision, recall, f1, num_pred, num_correct, num_gold = metric(Y, Y_hats)
+        print(metric(Y, Y), "||", metric(Y_hats, Y_hats))
         group_report["P Metric"] = precision
         group_report["R Metric"] = recall
         group_report["F1 Metric"] = f1
@@ -198,8 +236,12 @@ def eval(model, iterator, criterion):
         precision = group_report['weighted avg']['precision']
         recall = group_report['weighted avg']['recall']
         f1 = group_report['weighted avg']['f1-score']
+
     print("precision=%.4f" % precision)
     print("recall=%.4f" % recall)
     print("f1=%.4f" % f1)
+    print("num_pred=%.4f" % num_pred)
+    print("num_correct=%.4f" % num_correct)
+    print("num_gold=%.4f" % num_gold) 
     
     return precision, recall, f1, np.mean(np.asarray(valid_losses), axis=0), group_report
