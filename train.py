@@ -336,7 +336,7 @@ if __name__=="__main__":
     res = os.path.join('results', timestr)
     # # load the last checkpoint with the best model
     model.load_state_dict(torch.load(spath))
-    precision, recall, f1, test_loss = eval(model, test_iter, res, criterion, binary_criterion)
+    precision, recall, f1, test_loss = eval(model, test_iter, res, criterion, binary_criterion, sentiment_criterion, lexicon_criterion)
     print_msg = (f'test_precision: {precision:.5f} ' +
                  f'test_recall: {recall:.5f} ' +
                  f'test_f1: {f1:.5f}')
