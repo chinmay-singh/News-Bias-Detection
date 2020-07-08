@@ -11,6 +11,11 @@ from data_load import PropDataset, pad, VOCAB, tokenizer, tag2idx, idx2tag, num_
 import time
 from early_stopping import EarlyStopping
 
+SEED = 652
+torch.manual_seed(SEED)
+import random
+random.seed(SEED)
+
 timestr = time.strftime("%Y%m%d-%H%M%S")
 
 def train(model, iterator, optimizer, criterion, binary_criterion):
@@ -54,7 +59,6 @@ def train(model, iterator, optimizer, criterion, binary_criterion):
     train_loss = np.average(train_losses)
 
     return train_loss
-
 
 def eval(model, iterator, f, criterion, binary_criterion):
     model.eval()
@@ -194,7 +198,6 @@ def eval(model, iterator, f, criterion, binary_criterion):
             f1=1.0
         else:
             f1=0
-
     final = f + ".P%.4f_R%.4f_F1%.4f" %(precision, recall, f1)
     with open(final, 'w') as fout:
         result = open(f, "r").read()
@@ -265,7 +268,7 @@ if __name__=="__main__":
 
     # initialize the early_stopping object
     early_stopping = EarlyStopping(patience=hp.patience, verbose=True)
-
+    
     for epoch in range(1, hp.n_epochs+1):
         print("=========eval at epoch =",epoch,"=========")
         if not os.path.exists('checkpoints'): os.makedirs('checkpoints')
@@ -291,14 +294,14 @@ if __name__=="__main__":
                         "Precision": precision,
                         "Recall": recall,
                         "F1": f1})
-        # early_stopping(-1*f1, model, spath)
+        early_stopping(-1*f1, model, spath)
 
-        # if early_stopping.early_stop:
-        #     print("Early stopping")
-        #     break
+        if early_stopping.early_stop:
+            print("Early stopping")
+            break
 
     res = os.path.join('results', timestr)
-    # load the last checkpoint with the best model
+    # # load the last checkpoint with the best model
     model.load_state_dict(torch.load(spath))
     precision, recall, f1, test_loss = eval(model, test_iter, res, criterion, binary_criterion)
     print_msg = (f'test_precision: {precision:.5f} ' +

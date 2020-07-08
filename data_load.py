@@ -72,6 +72,17 @@ class PropDataset(data.Dataset):
                 flat_tags.append(tag)
                 flat_ids.append(id)
 
+        # import json
+        # dataset_type = fpath.split('/')[-1]
+        # fo = open(dataset_type +"_words.json", "w+")
+        # json.dump([flat_words, flat_ids], fo)
+        # fo.close()
+
+
+        # flat_sentiments = 
+        print(fpath, len(flat_words), flat_words[:2], )
+        print('\n')
+
         sents, ids = [], [] 
         tags_li = [[] for _ in range(num_task)]
    
