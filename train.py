@@ -77,6 +77,7 @@ def train(model, iterator, optimizer, criterion, binary_criterion, sentiment_cri
     return train_loss
 
 def eval(model, iterator, f, criterion, binary_criterion, sentiment_criterion, lexicon_criterion):
+    print(f)
     model.eval()
 
     valid_losses = []
@@ -288,7 +289,8 @@ if __name__=="__main__":
                          warmup=warmup_proportion,
                          t_total=num_train_optimization_steps)
 
-    criterion = nn.CrossEntropyLoss(ignore_index=0)
+    weights_labels_tensor = torch.tensor([0, 0.75] + [1] * 18).cuda() # Check the order in data_load.py  of VOCAB ~line 40
+    criterion = nn.CrossEntropyLoss(weight=weights_labels_tensor, ignore_index=0)
     binary_criterion = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([3932/14263]).cuda())
     sentiment_criterion = torch.nn.MSELoss(reduction='mean')
     lexicon_criterion = torch.nn.MSELoss(reduction='none')
