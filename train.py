@@ -16,19 +16,30 @@ torch.manual_seed(SEED)
 import random
 random.seed(SEED)
 
+lexi_ignore = (0.5 - hp.lexical_ignore_range, 0.5 + hp.lexical_ignore_range)
+print(lexi_ignore)
 timestr = time.strftime("%Y%m%d-%H%M%S")
+print(timestr)
 
-def train(model, iterator, optimizer, criterion, binary_criterion):
+def train(model, iterator, optimizer, criterion, binary_criterion, sentiment_criterion, lexicon_criterion):
     model.train()
 
     train_losses = []
 
     for k, batch in enumerate(iterator):
-        words, x, is_heads, att_mask, tags, y, seqlens = batch
+        words, x, is_heads, att_mask, tags, y, seqlens, sentiments, lexicons_gt = batch
+        sentiments = sentiments.unsqueeze(-1).cuda()
+        lexicons_gt = lexicons_gt.cuda()
         att_mask = torch.Tensor(att_mask)
 
         optimizer.zero_grad()
-        logits, _ = model(x, attention_mask=att_mask)
+        logits, _, senti_preds, lexi_preds = model(x, attention_mask=att_mask)
+        sentiment_loss = sentiment_criterion(senti_preds, sentiments)
+
+        lexi_loss = lexicon_criterion(lexi_preds , lexicons_gt)
+        lexical_mask = (lexicons_gt > lexi_ignore[0]) & (lexicons_gt < lexi_ignore[1])
+        lexi_loss.masked_fill_(lexical_mask, 0)
+        lexi_loss = torch.sum(lexi_loss) / torch.sum(~lexical_mask) # Average over non zero values
 
         loss = []
         if masking or num_task  == 2:
@@ -49,18 +60,23 @@ def train(model, iterator, optimizer, criterion, binary_criterion):
         elif num_task == 2:
             joint_loss = hp.alpha*loss[0] + (1-hp.alpha)*loss[1]
 
-        joint_loss.backward()
+        multi_task_loss = joint_loss + (hp.lexi_loss_wt * lexi_loss) + (hp.senti_loss_wt * sentiment_loss)
+        multi_task_loss.backward()
         optimizer.step()
-        train_losses.append(joint_loss.item())
+        train_losses.append([multi_task_loss.item(), joint_loss.item(), 
+                        hp.lexi_loss_wt * lexi_loss, hp.senti_loss_wt * sentiment_loss])
 
         if k%10==0: # monitoring
-            print("step: {}, loss: {}".format(k,loss[0].item()))
+            print("step: {}, multi_task_loss: {}, loss[0]: {}, joint_loss: {}, lexi_loss: {}, senti_loss: {}".format(
+                            k, multi_task_loss.item(), loss[0].item(), joint_loss.item(), 
+                            hp.lexi_loss_wt * lexi_loss, hp.senti_loss_wt * sentiment_loss
+                ))
 
-    train_loss = np.average(train_losses)
+    train_loss = np.average(train_losses, axis=0)
 
     return train_loss
 
-def eval(model, iterator, f, criterion, binary_criterion):
+def eval(model, iterator, f, criterion, binary_criterion, sentiment_criterion, lexicon_criterion):
     model.eval()
 
     valid_losses = []
@@ -71,10 +87,19 @@ def eval(model, iterator, f, criterion, binary_criterion):
     Y_hats = [[] for _ in range(num_task)]
     with torch.no_grad():
         for _ , batch in enumerate(iterator):
-            words, x, is_heads, att_mask, tags, y, seqlens = batch
+            words, x, is_heads, att_mask, tags, y, seqlens, sentiments, lexicons_gt = batch
+            sentiments = sentiments.unsqueeze(-1).cuda()
+            lexicons_gt = lexicons_gt.cuda()
+
             att_mask = torch.Tensor(att_mask)
-            logits, y_hats = model(x, attention_mask=att_mask) # logits: (N, T, VOCAB), y: (N, T)
-      
+            logits, y_hats, senti_preds, lexi_preds = model(x, attention_mask=att_mask) # logits: (N, T, VOCAB), y: (N, T)
+            sentiment_loss = sentiment_criterion(senti_preds, sentiments)
+
+            lexi_loss = lexicon_criterion(lexi_preds , lexicons_gt)
+            lexical_mask = (lexicons_gt > lexi_ignore[0]) & (lexicons_gt < lexi_ignore[1])
+            lexi_loss.masked_fill_(lexical_mask, 0)
+            lexi_loss = torch.sum(lexi_loss) / torch.sum(~lexical_mask) # Average over non zero values
+
             loss = []
             if num_task == 2 or masking:
                 for i in range(num_task):
@@ -94,7 +119,10 @@ def eval(model, iterator, f, criterion, binary_criterion):
             elif num_task == 2:
                 joint_loss = hp.alpha*loss[0] + (1-hp.alpha)*loss[1]
 
-            valid_losses.append(joint_loss.item())
+            multi_task_loss = joint_loss + (hp.lexi_loss_wt * lexi_loss) + (hp.senti_loss_wt * sentiment_loss)
+            valid_losses.append([multi_task_loss.item(), joint_loss.item(), 
+                        hp.lexi_loss_wt * lexi_loss, hp.senti_loss_wt * sentiment_loss])
+
             Words.extend(words)
             Is_heads.extend(is_heads)
 
@@ -102,7 +130,7 @@ def eval(model, iterator, f, criterion, binary_criterion):
                 Tags[i].extend(tags[i])
                 Y[i].extend(y[i].cpu().numpy().tolist())
                 Y_hats[i].extend(y_hats[i].cpu().numpy().tolist())
-    valid_loss = np.average(valid_losses) 
+    valid_loss = np.average(valid_losses, axis=0) 
 
     with open(f, 'w') as fout:
         y_hats, preds = [[] for _ in range(num_task)], [[] for _ in range(num_task)]
@@ -262,9 +290,8 @@ if __name__=="__main__":
 
     criterion = nn.CrossEntropyLoss(ignore_index=0)
     binary_criterion = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([3932/14263]).cuda())
-
-    avg_train_losses = []
-    avg_valid_losses = []
+    sentiment_criterion = torch.nn.MSELoss(reduction='mean')
+    lexicon_criterion = torch.nn.MSELoss(reduction='none')
 
     # initialize the early_stopping object
     early_stopping = EarlyStopping(patience=hp.patience, verbose=True)
@@ -276,21 +303,25 @@ if __name__=="__main__":
         fname = os.path.join('checkpoints', timestr)
         spath = os.path.join('checkpoints', timestr+".pt")
 
-        train_loss = train(model, train_iter, optimizer, criterion, binary_criterion)
-        avg_train_losses.append(train_loss.item())
+        train_loss = train(model, train_iter, optimizer, criterion, binary_criterion, sentiment_criterion, lexicon_criterion)
 
-        precision, recall, f1, valid_loss = eval(model, eval_iter, fname, criterion, binary_criterion)
-        avg_valid_losses.append(valid_loss.item())
+        precision, recall, f1, valid_loss = eval(model, eval_iter, fname, criterion, binary_criterion, sentiment_criterion, lexicon_criterion)
 
         epoch_len = len(str(hp.n_epochs))
         print_msg = (f'[{epoch:>{epoch_len}}/{hp.n_epochs:>{epoch_len}}]     ' +
-                     f'train_loss: {train_loss:.5f} ' +
-                     f'valid_loss: {valid_loss:.5f}')
+                     f'train_loss: {train_loss[0]:.5f} ' +
+                     f'valid_loss: {valid_loss[0]:.5f}')
         print(print_msg)
 
         if hp.wandb:
-            wandb.log({"Training Loss": train_loss,
-                        "Validation Loss": valid_loss,
+            wandb.log({"Training Loss": train_loss[0],
+                        "Validation Loss": valid_loss[0],
+                        "Training Joint Loss": train_loss[1],
+                        "Validation Joint Loss": valid_loss[1],
+                        "Training Lexical Loss": train_loss[2],
+                        "Validation Lexical Loss": valid_loss[2],
+                        "Training Sentiment Loss": train_loss[3],
+                        "Validation Sentiment Loss": valid_loss[3],
                         "Precision": precision,
                         "Recall": recall,
                         "F1": f1})

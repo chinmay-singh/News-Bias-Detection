@@ -79,19 +79,46 @@ class PropDataset(data.Dataset):
         # fo.close()
 
 
-        # flat_sentiments = 
-        print(fpath, len(flat_words), flat_words[:2], )
+        import json
+        dataset_type = fpath.split('/')[-1]
+        fo = open(dataset_type + "_senti.json", "r+")
+        data_senti = json.load(fo)
+        fo.close()
+
+        flat_sentiments = []
+        flat_lexicons = []
+        for w, id in zip(flat_words, flat_ids):
+            cnt = 0
+            for triplet in data_senti[id]:
+                if triplet[0] == w:
+                    flat_sentiments.append(triplet[1])
+                    flat_lexicons.append(list(map(lambda x: [float(x[0]), float(x[1]), float(x[2])], triplet[2])))
+                    cnt = 1
+                    break
+
+            assert cnt == 1, print(w, id)
+
+        assert len(flat_sentiments) == len(flat_lexicons)
+        assert len(flat_words) == len(flat_sentiments)
+        assert list(map(len, flat_lexicons)) == list(map(len, flat_words))
+
+        print(fpath, len(flat_words), flat_words[:2], len(flat_ids), flat_ids[:2])
+        print(flat_sentiments[:2], len(flat_sentiments), flat_lexicons[:2], len(flat_lexicons))
         print('\n')
 
+        lexis, sentis = [], []
         sents, ids = [], [] 
         tags_li = [[] for _ in range(num_task)]
    
-        for word, tag, id in zip(flat_words, flat_tags, flat_ids):
+        for word, tag, id, senti, lexi in zip(flat_words, flat_tags, flat_ids, flat_sentiments, flat_lexicons):
             words = word
             tags = tag
 
+            sentis.append(senti)
+            lexis.append([[0.50, 0.50, 0.50]] + lexi + [[0.50, 0.50, 0.50]]) # for CLS and SEP
             ids.append([id])
             sents.append(["[CLS]"] + words + ["[SEP]"])
+            assert len(lexis) == len(sents)
             tmp_tags = []
 
             if num_task != 2:
@@ -112,7 +139,8 @@ class PropDataset(data.Dataset):
                     tags_li[i].append(["<PAD>"] + tmp_tags[i] + ["<PAD>"])
 
         self.sents, self.ids, self.tags_li = sents, ids, tags_li
-        assert len(sents) == len(ids) == len(tags_li[0])
+        self.sentiments, self.lexicons = sentis, lexis
+        assert len(sents) == len(ids) == len(tags_li[0]) == len(self.sentiments) == len(self.lexicons)
 
     def __len__(self):
         return len(self.sents)
@@ -121,19 +149,22 @@ class PropDataset(data.Dataset):
         words = self.sents[idx] # tokens, tags: string list
         ids = self.ids[idx] # tokens, tags: string list
         tags = list(list(zip(*self.tags_li))[idx])
+        sentiments = self.sentiments[idx]
+        raw_lexicons = self.lexicons[idx]
 
+        lexicons_gt = []
         x, is_heads = [], [] # list of ids
         y = [[] for _ in range(num_task)] # list of lists of lists
         tt = [[] for _ in range(num_task)] # list of lists of lists
         if num_task != 2:
-            for w, *t in zip(words, *tags):
+            for w, *t, lexi in zip(words, *tags, raw_lexicons):
                 tokens = tokenizer.tokenize(w) if w not in ("[CLS]", "[SEP]") else [w]
                 xx = tokenizer.convert_tokens_to_ids(tokens)
     
                 is_head = [1] + [0]*(len(tokens) - 1)
                 if len(xx) < len(is_head):
                     xx = xx + [100] * (len(is_head) - len(xx))
-    
+                lexicons_gt.extend([lexi] * len(tokens))
                 t = [[t[i]] + [t[i]] * (len(tokens) - 1) for i in range(num_task)]
 
                 y_tmp = []
@@ -143,16 +174,16 @@ class PropDataset(data.Dataset):
 
                 x.extend(xx)
                 is_heads.extend(is_head)
-    
+
         elif masking or num_task == 2:
-            for w, t in zip(words, tags[0]):
+            for w, t, lexi in zip(words, tags[0], raw_lexicons):
                 tokens = tokenizer.tokenize(w) if w not in ("[CLS]", "[SEP]") else [w]
                 xx = tokenizer.convert_tokens_to_ids(tokens)
 
                 is_head = [1] + [0]*(len(tokens) - 1)
                 if len(xx) < len(is_head):
                     xx = xx + [100] * (len(is_head) - len(xx))
-
+                lexicons_gt.extend([lexi] * len(tokens))
                 t = [t] + [t] * (len(tokens) - 1)
                 y[0].extend([tag2idx[0][each] for each in t])
                 tt[0].extend(t)
@@ -174,32 +205,36 @@ class PropDataset(data.Dataset):
             tags[i]= " ".join(tags[i]) 
 
         att_mask = [1] * seqlen
-        return words, x, is_heads, att_mask, tags, y, seqlen
+        return words, x, is_heads, att_mask, tags, y, seqlen, sentiments, lexicons_gt
 
 def pad(batch):
     f = lambda x: [sample[x] for sample in batch]
     words = f(0)
     is_heads = f(2)
-    seqlen = f(-1)
+    seqlen = f(6)
+    sentiments = torch.FloatTensor(f(7))
+    lexicons_gt = f(8)
     maxlen = 210
 
     f = lambda x, seqlen: [sample[x] + [0] * (seqlen - len(sample[x])) for sample in batch] # 0: <pad>
     x = torch.LongTensor(f(1, maxlen))
 
-    att_mask = f(-4, maxlen)
+    att_mask = f(3, maxlen)
     y = []
     tags = []
 
-    if num_task !=2:
+    if num_task != 2:
         for i in range(num_task):
-            y.append(torch.LongTensor([sample[-2][i] + [0] * (maxlen-len(sample[-2][i])) for sample in batch]))
-            tags.append([sample[-3][i] for sample in batch])
+            y.append(torch.LongTensor([sample[5][i] + [0] * (maxlen-len(sample[5][i])) for sample in batch]))
+            tags.append([sample[4][i] for sample in batch])
     else:
-        y.append(torch.LongTensor([sample[-2][0] + [0] * (maxlen-len(sample[-2][0])) for sample in batch]))
-        y.append(torch.LongTensor([sample[-2][1] for sample in batch]))
+        y.append(torch.LongTensor([sample[5][0] + [0] * (maxlen-len(sample[5][0])) for sample in batch]))
+        y.append(torch.LongTensor([sample[5][1] for sample in batch]))
         for i in range(num_task):
-            tags.append([sample[-3][i] for sample in batch])
+            tags.append([sample[4][i] for sample in batch])
 
-
-    return words, x, is_heads, att_mask, tags, y, seqlen
+    f = lambda x, seqlen: [sample[x] + [[0.5, 0.5, 0.5]] * (seqlen - len(sample[x])) for sample in batch] # 0: <pad>
+    lexicons_gt = f(8, maxlen)
+    lexicons_gt = torch.FloatTensor(lexicons_gt)
+    return words, x, is_heads, att_mask, tags, y, seqlen, sentiments, lexicons_gt
 

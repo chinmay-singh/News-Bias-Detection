@@ -22,4 +22,9 @@ parser.add_argument("--testset", type=str, default='./data/protechn_corpus_eval/
 parser.add_argument("--wandb",  dest="wandb", action="store_true", default= False)
 parser.add_argument("--run", type=str, default=None)
 
+# Losses
+parser.add_argument("--lexi_loss_wt", type=int, default=1, help="Weight for lexical loss")
+parser.add_argument("--lexical_ignore_range", type=float, default=0.001, help="Only ground truth values (> 0.5 + range) and ( < 0.5 - range) be considered for loss.")
+parser.add_argument("--senti_loss_wt", type=int, default=1, help="Weight for sentiment loss")
+
 hp = parser.parse_args()
